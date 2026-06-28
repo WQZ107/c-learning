@@ -1,0 +1,13 @@
+# 编译产生的可执行文件，不传到 GitHub
+*.exe
+*.o
+*.a
+*.so
+
+# VS Code 自动生成的文件
+.vscode/
+*.code-workspace
+
+# 编译输出目录
+Debug/
+Release/
