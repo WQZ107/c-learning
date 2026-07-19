@@ -7,6 +7,7 @@ typedef struct {
     unsigned int priority : 4;
 }StatusReg;
 
+
 void print_status(const StatusReg *s)
 {
     printf("ready=%d error=%d mode=%d priority=%d\n",
