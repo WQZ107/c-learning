@@ -1,0 +1,45 @@
+// sensor.h —— 项目的数据结构定义
+#ifndef __SENSOR_H__
+#define __SENSOR_H__
+
+#include <stdio.h>
+
+// 传感器类型
+typedef enum {
+    SENSOR_TEMP = 0,    // 温度
+    SENSOR_VOLT,        // 电压
+    SENSOR_SPEED,       // 速度
+    SENSOR_MAX          // 用于遍历（不实际使用）
+} SensorType;
+
+// 一个传感器数据点
+typedef struct {
+    SensorType type;    // 是什么传感器
+    double value;       // 数值
+    char timestamp[20]; // 时间 "2026-08-01 10:30:00"
+} SensorData;
+
+// 告警记录节点（用链表存）
+typedef struct AlertNode {
+    char time[20];
+    SensorType type;
+    double value;
+    double threshold;
+    struct AlertNode *next;
+} AlertNode;
+
+// 环形buffer结构
+typedef struct {
+    SensorData *buffer;
+    int head;       // 读位置
+    int tail;       // 写位置
+    int size;       // 容量
+} RingBuffer;
+
+// 读取传感器数值
+double sensor_read_value(SensorType type);
+
+// 获取当前时间字符串
+void get_timestamp(char *buf, int size);
+
+#endif

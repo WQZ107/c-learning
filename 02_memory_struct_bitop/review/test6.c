@@ -57,3 +57,5 @@ int main(void) {
 
     return 0;
 }
+// 若 horn 松开但 volumeUp 仍按住，则 AnyButtonPressed 仍返回 1；
+// 只有所有按键（volumeUp, volumeDown, cruiseOn, cruiseSet, horn）都松开时，返回 0。

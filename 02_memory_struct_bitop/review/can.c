@@ -57,7 +57,7 @@ int main(void) {
     // 检查无关位是否受影响（如 data[1] 的 bit0, bit1 和 data[2] 的 bit6, bit7 应保持原样）
     // 初始 data[1]=0xA5 (10100101), 写回后 bit0,bit1 应仍为 1,0? 实际上初始 bit0=1, bit1=0，清除时我们只清除了bit2-7，保留了bit0,1，所以应该不变。
     // data[2]=0x3C (00111100), bit6,7 为0，清除时只清bit0-5，保留bit6,7为0，不变。
-    printf("\n无关位检查：data[1] bit0-1 = %d%d, data[2] bit6-7 = %d%d\n",
+    printf("\n无关位检查:data[1] bit0-1 = %d%d, data[2] bit6-7 = %d%d\n",
            (data[1] >> 0) & 1, (data[1] >> 1) & 1,
            (data[2] >> 6) & 1, (data[2] >> 7) & 1);
 
