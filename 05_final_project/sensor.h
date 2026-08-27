@@ -42,4 +42,12 @@ double sensor_read_value(SensorType type);
 // 获取当前时间字符串
 void get_timestamp(char *buf, int size);
 
+//环形buffer操作（Day4新增）
+RingBuffer* rb_create(int size);                //创建
+int rb_is_empty(RingBuffer *rb);                //判空
+int rb_is_full(RingBuffer *rb);                 //判满
+int rb_write(RingBuffer *rb,SensorData *data);  //写入
+int rb_read(RingBuffer *rb,SensorData *data);   //读出
+void rb_free(RingBuffer *rb);                   //释放
+
 #endif
