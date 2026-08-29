@@ -4,7 +4,7 @@
 #include <string.h>
 #include <time.h>
 
-/* ========== 时间戳 ========== */
+/* ========== 时间戳（Day 3） ========== */
 void get_timestamp(char *buf, int size)
 {
     time_t now = time(NULL);
@@ -12,24 +12,22 @@ void get_timestamp(char *buf, int size)
     strftime(buf, size, "%Y-%m-%d %H:%M:%S", t);
 }
 
-/* ========== 模拟传感器读数 ========== */
+/* ========== 模拟传感器读数（Day 2） ========== */
 double sensor_read_value(SensorType type)
 {
     switch (type) {
         case SENSOR_TEMP:
-            return 25.0 + (rand() % 200) / 10.0;
+            return 25.0 + (rand() % 200) / 10.0;   // 25.0 ~ 44.9（温度）
         case SENSOR_VOLT:
-            return 11.5 + (rand() % 150) / 100.0;
+            return 11.5 + (rand() % 150) / 100.0;  // 11.50 ~ 12.99（电压）
         case SENSOR_SPEED:
-            return rand() % 130;
+            return rand() % 130;                    // 0 ~ 129（速度 km/h）
         default:
             return 0;
     }
-    // 注意：如果 switch 里所有 case 都 return 了，编译器不会到这里
-    // 但有些编译器会警告，可以加 return 0;
 }
 
-/* ========== 环形 Buffer ========== */
+/* ========== 环形 Buffer（Day 4） ========== */
 
 RingBuffer* rb_create(int size)
 {
@@ -77,5 +75,59 @@ void rb_free(RingBuffer *rb)
     if (rb) {
         free(rb->buffer);
         free(rb);
+    }
+}
+
+/* ========== 告警链表（Day 6 新增） ========== */
+
+// 头插法：新告警插到链表最前面，返回新的头
+AlertNode* alert_add(AlertNode *head, SensorType type, double value, double threshold)
+{
+    AlertNode *node = (AlertNode *)malloc(sizeof(AlertNode));
+    if (!node) return head;                 // 内存不够，原来的链表原样返回
+
+    char ts[20];
+    get_timestamp(ts, sizeof(ts));          // 复用 Day 3 的时间戳函数
+    strcpy(node->time, ts);
+    node->type = type;
+    node->value = value;
+    node->threshold = threshold;
+
+    node->next = head;                      // 新节点指向原来的头
+    return node;                            // 新节点成为新的头
+}
+
+// 从头到尾遍历打印（最新的告警在最前面）
+void alert_print(AlertNode *head)
+{
+    AlertNode *cur = head;
+    while (cur) {
+        printf("[%s] 类型%d = %.1f (阈值%.1f)\n",
+               cur->time, cur->type, cur->value, cur->threshold);
+        cur = cur->next;                    // 走到下一个节点
+    }
+}
+
+// 逐个释放，防止内存泄漏
+void alert_free(AlertNode *head)
+{
+    AlertNode *cur = head;
+    while (cur) {
+        AlertNode *tmp = cur;               // 先记住当前节点
+        cur = cur->next;                    // 再移到下一个
+        free(tmp);                          // 最后释放刚才那个
+    }
+}
+
+/* ========== 告警判断（Day 7 新增） ========== */
+
+// 返回 1 = 超阈值要告警，0 = 正常
+int check_alert(SensorType type, double value)
+{
+    switch (type) {
+        case SENSOR_TEMP:  return value > 80.0;    // 温度超80告警
+        case SENSOR_VOLT:  return value < 11.0;    // 电压低于11告警
+        case SENSOR_SPEED: return value > 100.0;   // 速度超100告警
+        default: return 0;
     }
 }

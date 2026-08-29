@@ -50,4 +50,15 @@ int rb_write(RingBuffer *rb,SensorData *data);  //写入
 int rb_read(RingBuffer *rb,SensorData *data);   //读出
 void rb_free(RingBuffer *rb);                   //释放
 
+// ── 告警链表（Day 6）──
+AlertNode* alert_add(AlertNode *head, SensorType type, double value, double threshold);
+void alert_print(AlertNode *head);
+void alert_free(AlertNode *head);
+
+// ── 告警判断（Day 7）──
+int check_alert(SensorType type, double value);
+
+//CSV存储（Day8）
+int save_to_csv(RingBuffer *rb,const char *filename);
+
 #endif
