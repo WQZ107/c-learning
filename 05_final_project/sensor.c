@@ -131,3 +131,25 @@ int check_alert(SensorType type, double value)
         default: return 0;
     }
 }
+
+/* ========== CSV存储（Day 8 新增） ========== */
+
+// 把环形buffer里剩的数据全部倒进CSV文件
+// 返回 0 成功，-1 失败
+int save_to_csv(RingBuffer *rb,const char *filename)
+{
+    FILE *fp = fopen(filename, "w");        // ① 打开文件（w=不存在就建，存在就清空）
+    if (!fp) {                              //    打不开（路径错/文件被占用）直接失败
+        return -1;
+    }
+
+    fprintf(fp,"type, value, timestamp\n"); // ② 先写表头
+
+    SensorData d;
+    while(rb_read(rb, &d) == 0) {           // ③ 把buffer逐条读空
+        fprintf(fp,"%d,%.2f,%s\n",d.type,d.value,d.timestamp);
+    }
+
+    fclose(fp);                             // ④ 关闭（必须！）
+    return 0;
+}
