@@ -11,3 +11,26 @@
 # 编译输出目录
 Debug/
 Release/
+
+# ===== Keil MDK 编译产物（STM32阶段，不需要上传） =====
+Output/
+Listings/
+Objects/
+DebugConfig/
+*.uvguix.*
+*.bak
+*.dep
+*.crf
+*.d
+*.lst
+*.lnp
+*.htm
+*.axf
+*.hex
+*.bin
+*.map
+JLinkLog/
+
+# ===== Windows 系统文件 =====
+Thumbs.db
+Desktop.ini
