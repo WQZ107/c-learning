@@ -41,9 +41,11 @@ int main(void)
     
     while(1)
     {
-        led_blink_times(6,100);     //6次翻转=亮3下，结束在灭
-        delay_ms(300);             //灭着停顿
-        led_blink_times(4,1000);    //4次翻转=亮2下，结束在灭
-        delay_ms(1000);             //全灭1秒  真 停在灭
+//        led_blink_times(6,100);     //6次翻转=亮3下，结束在灭
+//        delay_ms(300);             //灭着停顿
+//        led_blink_times(4,1000);    //4次翻转=亮2下，结束在灭
+//        delay_ms(1000);             //全灭1秒  真 停在灭
+        LED_Toggle();
+        delay_ms(500);
     }
 }
