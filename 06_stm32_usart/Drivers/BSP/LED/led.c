@@ -49,3 +49,27 @@ void led_init(void)
     LED0(1);                                                /* 关闭 LED0 */
     LED1(1);                                                /* 关闭 LED1 */
 }
+
+//LED打开：拉低点亮
+void LED_On(void)
+{
+    HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_RESET);
+}
+
+//LED关闭：拉高熄灭
+void LED_Off(void)
+{
+    HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_SET);
+}
+
+//LED翻转
+void LED_Toggle(void)
+{
+    HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_5);
+}
+
+//读取LED状态：返回1=亮
+int LED_GetState(void)
+{
+    return (HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_5) == GPIO_PIN_RESET) ? 1 : 0;
+}

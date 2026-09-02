@@ -23,6 +23,15 @@
 #include "./SYSTEM/usart/usart.h"
 #include "./BSP/LED/led.h"
 
+//发送一个字符串：指针遍历，遇到'\0'停
+void UART_SendString(char *str)
+{
+    while(*str)         //str不是'\0'就继续
+    {
+        HAL_UART_Transmit(&g_uart1_handle,(uint8_t *)str,1,100); 
+        str++;          //指针移到下一个字符
+    }
+}
 
 int main(void)
 {
@@ -45,6 +54,8 @@ int main(void)
         printf("温度：%.1f 度\r\n",temperature);
         printf("LED引脚电平：%d\r\n",HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_5));
         printf("\r\n");
-        delay_ms(2000);
+        UART_SendString("板子还活着\r\n");
+        LED_Toggle();
+        delay_ms(1000);
     }
 }
