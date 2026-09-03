@@ -23,39 +23,26 @@
 #include "./SYSTEM/usart/usart.h"
 #include "./BSP/LED/led.h"
 
-//发送一个字符串：指针遍历，遇到'\0'停
-void UART_SendString(char *str)
-{
-    while(*str)         //str不是'\0'就继续
-    {
-        HAL_UART_Transmit(&g_uart1_handle,(uint8_t *)str,1,100); 
-        str++;          //指针移到下一个字符
-    }
-}
 
 int main(void)
 {
-    int count = 0;
-    float temperature = 25.5f;
-    char name[] = "STM32F103ZET6";
-    
     HAL_Init();                                 /* 初始化HAL库 */
     sys_stm32_clock_init(RCC_PLL_MUL9);         /* 设置时钟,72M */
     delay_init(72);                             /* 初始化延时函数 */
     led_init();                                 /* 初始化LED */
     usart_init(115200);                         /* 波特率设为115200 */
     
-    //printf("请输入一个英文字符：\r\n\r\n");
-    
-    while(1)
+//    uint8_t rx_byte;    /* 存收到的1个字节 */
+
+    while (1)
     {
-        printf("=== 第%d次上报 ===\r\n",    ++count);
-        printf("板子：%s\r\n",name);
-        printf("温度：%.1f 度\r\n",temperature);
-        printf("LED引脚电平：%d\r\n",HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_5));
-        printf("\r\n");
-        UART_SendString("板子还活着\r\n");
+        /* 阻塞等待收1字节：没收到就在这等100ms，返回值!=HAL_OK就是超时 */
+//        if (HAL_UART_Receive(&g_uart1_handle, &rx_byte, 1, 100) == HAL_OK)
+//        {
+//            printf("收到字符: %c (ASCII: %d)\r\n", rx_byte, rx_byte);
+//        }
+        
         LED_Toggle();
-        delay_ms(1000);
+        delay_ms(3000);
     }
 }

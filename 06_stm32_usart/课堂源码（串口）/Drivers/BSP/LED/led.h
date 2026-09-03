@@ -63,6 +63,5 @@ void led_init(void);
 void LED_On(void);
 void LED_Off(void);
 void LED_Toggle(void);
-int LED_GetState(void);
-
+int  LED_GetState(void);
 #endif
