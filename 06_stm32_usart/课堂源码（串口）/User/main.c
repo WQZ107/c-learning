@@ -24,25 +24,27 @@
 #include "./BSP/LED/led.h"
 
 
+extern uint8_t g_usart1_rx_flag;
+extern uint8_t g_rx_buffer[1];
+
 int main(void)
 {
-    HAL_Init();                                 /* 初始化HAL库 */
-    sys_stm32_clock_init(RCC_PLL_MUL9);         /* 设置时钟,72M */
-    delay_init(72);                             /* 初始化延时函数 */
-    led_init();                                 /* 初始化LED */
-    usart_init(115200);                         /* 波特率设为115200 */
+    HAL_Init();
+    sys_stm32_clock_init(RCC_PLL_MUL9);
+    delay_init(72);
+    led_init();
+    usart_init(115200);
     
-//    uint8_t rx_byte;    /* 存收到的1个字节 */
-
-    while (1)
+    printf("中断接收实验（变体B）：发字符试试\r\n");
+    
+    while(1)
     {
-        /* 阻塞等待收1字节：没收到就在这等100ms，返回值!=HAL_OK就是超时 */
-//        if (HAL_UART_Receive(&g_uart1_handle, &rx_byte, 1, 100) == HAL_OK)
-//        {
-//            printf("收到字符: %c (ASCII: %d)\r\n", rx_byte, rx_byte);
-//        }
-        
+        if (g_usart1_rx_flag == 1)       //查标志：有字节到了
+        {
+            g_usart1_rx_flag = 0;
+            HAL_UART_Transmit(&g_uart1_handle,(uint8_t*)g_rx_buffer,1,100);
+        }
         LED_Toggle();
-        delay_ms(3000);
+        delay_ms(200);
     }
 }

@@ -75,7 +75,7 @@ void usart_init(uint32_t baudrate)
     g_uart1_handle.Init.Mode = UART_MODE_TX_RX;
     HAL_UART_Init(&g_uart1_handle);
     
-//    HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t*)g_rx_buffer, 1);
+    HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t*)g_rx_buffer, 1);
 }
 
 /* 串口MSP回调函数 */
@@ -106,7 +106,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 void USART1_IRQHandler(void)
 {
     HAL_UART_IRQHandler(&g_uart1_handle);
-//    HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t*)g_rx_buffer, 1);
+    HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t*)g_rx_buffer, 1);
 }
 
 /* 串口数据接收完成回调函数 */
@@ -115,6 +115,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     if(huart->Instance == USART1)
     {
         g_usart1_rx_flag = 1;
+//        HAL_UART_Transmit(&g_uart1_handle,(uint8_t*)g_rx_buffer,1,100);
     }
 }
 
