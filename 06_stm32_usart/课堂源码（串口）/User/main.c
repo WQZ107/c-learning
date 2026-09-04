@@ -24,8 +24,11 @@
 #include "./BSP/LED/led.h"
 
 
-extern uint8_t g_usart1_rx_flag;
-extern uint8_t g_rx_buffer[1];
+//extern uint8_t g_usart1_rx_flag;
+//extern uint8_t g_rx_buffer[1];
+
+extern uint8_t cmd_ready;
+extern uint8_t cmd_buf[];
 
 int main(void)
 {
@@ -35,16 +38,16 @@ int main(void)
     led_init();
     usart_init(115200);
     
-    printf("中断接收实验（变体B）：发字符试试\r\n");
+    printf("命令接收测试，发 hello+回车 试试\r\n");
     
-    while(1)
+    while (1)
     {
-        if (g_usart1_rx_flag == 1)       //查标志：有字节到了
+        if (cmd_ready)                          /* 一条完整命令到了 */
         {
-            g_usart1_rx_flag = 0;
-            HAL_UART_Transmit(&g_uart1_handle,(uint8_t*)g_rx_buffer,1,100);     //回显放主循环
+            cmd_ready = 0;
+            printf("收到命令: [%s]\r\n", cmd_buf);   /* 块五这里换成 ProcessCommand(cmd_buf) */
         }
-        LED_Toggle();
-        delay_ms(200);      //LED照常闪
+        LED_Toggle();                           /* 主循环该干嘛干嘛 */
+        delay_ms(200);                          /* 就算慢成这样，字节也一个不丢 */
     }
 }
