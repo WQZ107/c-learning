@@ -42,9 +42,9 @@ int main(void)
         if (g_usart1_rx_flag == 1)       //查标志：有字节到了
         {
             g_usart1_rx_flag = 0;
-            HAL_UART_Transmit(&g_uart1_handle,(uint8_t*)g_rx_buffer,1,100);
+            HAL_UART_Transmit(&g_uart1_handle,(uint8_t*)g_rx_buffer,1,100);     //回显放主循环
         }
         LED_Toggle();
-        delay_ms(200);
+        delay_ms(200);      //LED照常闪
     }
 }
