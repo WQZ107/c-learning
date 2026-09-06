@@ -103,7 +103,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 }
 
 /* 串口1中断服务函数 */
-void USART1_IRQHandler(void)
+void USART1_IRQHandler(void)  //续杯
 {
     HAL_UART_IRQHandler(&g_uart1_handle);
     HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t*)g_rx_buffer, 1);
@@ -126,7 +126,7 @@ int cmd_len = 0;
 
 volatile uint8_t cmd_ready = 0;         //完整命令就绪标志，主循环消费
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)     //回调
 {
     if (huart->Instance == USART1)
     {
