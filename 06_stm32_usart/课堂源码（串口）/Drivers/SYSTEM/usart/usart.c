@@ -119,32 +119,32 @@ void USART1_IRQHandler(void)
 //    }
 //}
 
+
 /* 全局变量（放在 usart.c 顶部） */
+uint8_t cmd_buf[64];
+int cmd_len = 0;
 
-
-char cmd_buf[64];
-int  cmd_len = 0;
-volatile uint8_t cmd_ready = 0;      /* 完整命令就绪标志，主循环消费 */
+volatile uint8_t cmd_ready = 0;         //完整命令就绪标志，主循环消费
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
     {
-        uint8_t ch = g_rx_buffer[0];            /* 取走这个字节（中断里取，绝不丢） */
-
-        if (ch == '\n')                         /* 约定：换行=一条命令结束 */
+        uint8_t ch = g_rx_buffer[0];        //取走这个字节（中断里取，绝不丢）
+        
+        if (ch == '\n')                     //约定：换行=一条命令结束
         {
-            cmd_buf[cmd_len] = '\0';            /* 补字符串结尾 */
-            cmd_ready = 1;                      /* 通知主循环（中断里只置标志，不干活） */
-            cmd_len = 0;                        /* ← 关键！命令结束必须重置长度，否则下一次接着往里拼 */
+            cmd_buf[cmd_len] = '\0';        //补字符串结尾
+            cmd_ready = 1;                  //通知主循环（中断里只置标志，不干活）
+            cmd_len = 0;                    //关键！命令结束必须重置长度，否则下一次接着往里拼
         }
-        else if (ch != '\r')                    /* 忽略回车符 */
+        else if (ch != '\r')                //忽略回车键
         {
-            if (cmd_len < (int)sizeof(cmd_buf) - 1)   /* 防越界！ */
+            if (cmd_len < (int)sizeof(cmd_buf) - 1)     //防越界
             {
                 cmd_buf[cmd_len++] = ch;
             }
         }
-        /* "续杯"不用写：USART1_IRQHandler 里的 Receive_IT 已由驱动完成 */
+        //"续杯"不用写：USART1_IRQHandler 里的 Receive_IT 已由驱动完成
     }
 }
