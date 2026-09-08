@@ -5,13 +5,9 @@
 #include <string.h>
 
 
-//LED控制（块一，低电平点亮）
-//void LED_On(void)       { HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_RESET);}
-//void LED_Off(void)      { HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_SET);}
-//void LED_Toggle(void)   { HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_5);}
-//int LED_GetState(void)  { return (HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_5) == GPIO_PIN_RESET) ? 1 : 0;} //1=亮
+/* 运行秒数（全局：ProcessCommand 和 main 共用） */
+uint32_t run_seconds = 0;
 
-//KEY0 外部中断 （块四，PE4）
 static void key_exti_init(void)
 {
     GPIO_InitTypeDef gpio_init_struct;
@@ -58,9 +54,8 @@ void ProcessCommand(uint8_t *cmd)
     }
     else if (strcmp((char *)cmd,"STATUS") == 0)
     {
-        printf("LED状态：%s,运行：%u秒\r\n",
-        LED_GetState() ? "开" : "关",             //GetState已修正：1=亮=开 
-        (uint32_t)HAL_GetTick() / 1000);                   //HAL_GetTick=开机毫秒数
+        printf("LED状态:%s, 运行:%u秒\r\n",
+       LED_GetState() ? "开" : "关", run_seconds);
     }
     else
     {
@@ -87,22 +82,29 @@ int main(void)
     delay_init(72);
     led_init();
     usart_init(115200);
-    key_exti_init();                        //驱动内部已开启中断接收+自动续
-    LED_Off();                              //KEY0外部中断
-    
+    key_exti_init();
+    LED_Off();
+
     printf("=== 串口命令控制系统启动 ===\r\n");
     printf("支持命令: LED_ON / LED_OFF / STATUS\r\n");
-    
-    uint32_t last_heartbeat = 0;        //上次心跳时刻
-    
-    while(1)
+
+    uint16_t cnt_100ms = 0;              /* 保留：分片计时器 */
+
+    while (1)
     {
         poll_command();
-        
-        if (HAL_GetTick() - last_heartbeat >= 10000)
+
+        delay_ms(100);
+
+        if (++cnt_100ms >= 10)
         {
-            printf("ALIVE,运行:%u秒\r\n",(uint32_t)HAL_GetTick() / 1000u);
-            last_heartbeat = HAL_GetTick();
+            cnt_100ms = 0;
+            run_seconds++;               /* ← 现在加的是全局的，ProcessCommand 就能读到了 */
+
+            if (run_seconds % 10 == 0)
+            {
+                printf("ALIVE %us\r\n", run_seconds);
+            }
         }
     }
 }

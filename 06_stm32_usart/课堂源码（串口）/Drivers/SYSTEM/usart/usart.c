@@ -5,6 +5,11 @@
 /******************************************************************************************/
 /* 加入以下代码, 支持printf函数, 而不需要选择use MicroLIB */
 
+/* 全局变量（放在 usart.c 顶部） */
+uint8_t cmd_buf[64];                    //拼好的命令
+int cmd_len = 0;                        //当前长度
+volatile uint8_t cmd_ready = 0;         //完整命令就绪标志，主循环消费，(中断与主循环共享→volatile)
+
 #if 1
 
 #if (__ARMCC_VERSION >= 6010050)            /* 使用AC6编译器时 */
@@ -108,23 +113,6 @@ void USART1_IRQHandler(void)  //续杯
     HAL_UART_IRQHandler(&g_uart1_handle);
     HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t*)g_rx_buffer, 1);
 }
-
-/* 串口数据接收完成回调函数 */
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-//{
-//    if(huart->Instance == USART1)
-//    {
-//        g_usart1_rx_flag = 1;
-////        HAL_UART_Transmit(&g_uart1_handle,(uint8_t*)g_rx_buffer,1,100);
-//    }
-//}
-
-
-/* 全局变量（放在 usart.c 顶部） */
-uint8_t cmd_buf[64];
-int cmd_len = 0;
-
-volatile uint8_t cmd_ready = 0;         //完整命令就绪标志，主循环消费
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)     //回调
 {
