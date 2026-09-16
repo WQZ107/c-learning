@@ -6,6 +6,7 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
+
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "can.h"
@@ -14,23 +15,45 @@
 
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdint.h>
+#include <string.h>
 /* USER CODE END Includes */
 
-/* USER CODE BEGIN PTD */
-/* USER CODE END PTD */
-/* USER CODE BEGIN PD */
-/* USER CODE END PD */
-/* USER CODE BEGIN PM */
-/* USER CODE END PM */
+/* Private variables ---------------------------------------------------------*/
+
 /* USER CODE BEGIN PV */
 /* USER CODE END PV */
 
+/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 
 /* USER CODE BEGIN PFP */
+// ==================== å£°æ˜å·¥å…·å‡½æ•° ====================
+void ShowFloatBytes(const char *name, float v);
+
+uint8_t PackFloatLE(float v, uint8_t *out);
+uint8_t PackInt16LE(int16_t v, uint8_t *out);
+uint8_t PackInt16BE(int16_t v, uint8_t *out);
+
+float UnpackFloatLE(const uint8_t *in);
+float UnpackFloatLE_WRONG(const uint8_t *in);
+int16_t UnpackInt16LE(const uint8_t *in);
+int16_t UnpackInt16BE(const uint8_t *in);
+
+void TestPackUnpack(void);
+
+// å£°æ˜åè®®å‘é€å‡½æ•°
+uint8_t CAN_SendLatitude(float lat);
+uint8_t CAN_SendLongitude(float lon);
+uint8_t CAN_SendSpeed(int16_t speed);
+uint8_t CAN_SendTemperature(float temp);
+
+// å£°æ˜æ¥æ”¶è§£æå‡½æ•°
+void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
+// ==================== é‡å®šå‘ printf åˆ° UART1 ====================
 int fputc(int ch, FILE *f)
 {
     HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 100);
@@ -60,30 +83,15 @@ void CAN_Start(void)
     if (HAL_CAN_Start(&hcan) != HAL_OK)
         printf("[ERR] CAN_Start failed!\r\n");
 
-    /* ============================================================
-     * ¡¾¸Ä¶¯1¡¿ÂÖÑ¯Ä£Ê½£º²»¿ª½ÓÊÕÖĞ¶Ï
-     * ÖĞ¶ÏºÍÂÖÑ¯»áÕùÇÀÍ¬Ò»¸ö FIFO£º¿ªÁËÖĞ¶Ï£¬Ö¡Ò»½ø FIFO ¾Í±»
-     * ÖĞ¶ÏÈ¡×ß£¬Ö÷Ñ­»·ÂÖÑ¯ÓÀÔ¶¶Áµ½ 0¡£
-     * µÈÂÖÑ¯°æÎÈ¶¨ºó£¬ÔÙµ¥¶À×öÖĞ¶Ï°æ¶ÔÕÕÊµÑé¡£
-     * ============================================================ */
-    /* HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING); */
-
-    /* ¿ª»úºá·ù£ºÒ»ÑÛ¿´³ö°å×ÓÀïÅÜµÄÊÇÄÄÒ»°æ */
-    printf("\r\n===== CAN_LOOPBACK | Mode=%s | Filter=%s | NART=%s | RX=%s | Built %s %s =====\r\n",
-           (hcan.Init.Mode == CAN_MODE_LOOPBACK)    ? "LOOPBACK" : "NORMAL",
-           (filter.FilterActivation == ENABLE)      ? "ENABLE"   : "DISABLE",
-           (hcan.Init.AutoRetransmission == ENABLE) ? "ON"       : "OFF",
-           "POLL-NORMAL",
+    printf("\r\n===== CAN_LOOPBACK | Mode=%s | Filter=%s | Built %s %s =====\r\n",
+           (hcan.Init.Mode == CAN_MODE_LOOPBACK) ? "LOOPBACK" : "NORMAL",
+           (filter.FilterActivation == ENABLE) ? "ENABLE" : "DISABLE",
            __DATE__, __TIME__);
-
-    printf("[INIT] BTR=0x%08lX IER=0x%08lX (IER=0 ±íÊ¾Ã»¿ªÈÎºÎÖĞ¶Ï)\r\n",
-           hcan.Instance->BTR, hcan.Instance->IER);
 }
 
-/* ·¢ËÍÒ»Ö¡¡£·µ»Ø 0=³É¹¦£¬1=Ê§°Ü */
 uint8_t CAN_Send(uint32_t id, uint8_t *data, uint8_t len)
 {
-    if (len > 8) return 1;              /* DLC ±£»¤ */
+    if (len > 8) return 1;
 
     tx_header.StdId = id;
     tx_header.IDE   = CAN_ID_STD;
@@ -92,8 +100,8 @@ uint8_t CAN_Send(uint32_t id, uint8_t *data, uint8_t len)
 
     uint32_t t0 = HAL_GetTick();
     while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0) {
-        if (HAL_GetTick() - t0 > 10) {  /* ³¬Ê±±£»¤£¬±ğËøËÀ */
-            printf("[CAN] ÓÊÏäÂú£¡²é£º¶Ô¶ËÉÏµç£¿²¨ÌØÂÊ£¿Ä£Ê½£¿\r\n");
+        if (HAL_GetTick() - t0 > 10) {
+            printf("[CAN] Mailbox full!\r\n");
             return 1;
         }
     }
@@ -101,33 +109,27 @@ uint8_t CAN_Send(uint32_t id, uint8_t *data, uint8_t len)
     return (HAL_CAN_AddTxMessage(&hcan, &tx_header, data, &tx_mailbox) == HAL_OK) ? 0 : 1;
 }
 
-/* ============================================================
- * ¡¾¸Ä¶¯2¡¿ÂÖÑ¯½ÓÊÕ£ºFIFO0 ÓĞÖ¡¾ÍÈ¡³öÀ´´òÓ¡
- * ·µ»Ø 1 = È¡µ½Ò»Ö¡£¬·µ»Ø 0 = µ±Ç°Ã»ÓĞÖ¡£¨²»×èÈû£©
- * ============================================================ */
 uint8_t CAN_PollReceive(void)
 {
     CAN_RxHeaderTypeDef rx_header;
     uint8_t rx_data[8];
 
-    /* ¢Ù ÏÈ¿´ FIFO0 ÀïÓĞÃ»ÓĞÖ¡ ¡ª¡ª ²»ÒÀÀµÈÎºÎÖĞ¶Ï */
     if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) == 0)
         return 0;
 
-    /* ¢Ú ÓĞÖ¡¾ÍÈ¡³öÀ´ */
     if (HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK)
         return 0;
 
-    /* ¢Û ´òÓ¡ */
-    printf("[RX] ID=0x%03X DLC=%d Data:", rx_header.StdId, rx_header.DLC);
-    for (int i = 0; i < rx_header.DLC; i++)
-        printf(" %02X", rx_data[i]);
-    printf("\r\n");
-
+    // æ”¶åˆ°æ•°æ®åè°ƒç”¨è§£æå‡½æ•°å¤„ç†
+    CAN_ProcessRx(&rx_header, rx_data);
     return 1;
 }
 /* USER CODE END 0 */
 
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -150,38 +152,40 @@ int main(void)
   /* USER CODE BEGIN 2 */
   CAN_Start();
   printf("=== CAN Loopback Test (polling RX) ===\r\n");
+
+  // æ‰§è¡Œæ‰“åŒ…è§£åŒ…æµ‹è¯•
+  TestPackUnpack();
   /* USER CODE END 2 */
 
+  /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    uint8_t tx_data[8] = {0x20, 0x23, 0x09, 0x14, 0x00, 0x00, 0x00, 0x00};
+    // å‘é€çº¬åº¦ 23.123456ï¼ˆ4å­—èŠ‚float å°ç«¯ï¼‰
+    float lat = 23.123456f;
+    printf("[TX] 0x100 lat=%.6f\r\n", lat);
+    CAN_SendLatitude(lat);
 
-    /* --- ·¢ËÍ --- */
-    CAN_Send(0x100, tx_data, (uint8_t)8);
-    printf("[TX] ID=0x100 sent\r\n");
-
-    /* ============================================================
-     * ¡¾¸Ä¶¯3¡¿·¢ËÍºóÖ÷¶¯ÂÖÑ¯È¡Ö¡
-     * ×î¶àÊÔ 20 ´Î ¡Á 1ms = 20ms£¬È¡µ½¾Í break¡£
-     * Õı³£Çé¿öµÚ 1 ´Î¾ÍÄÜÈ¡µ½£¨Ö¡Ô¼ 200us ºó½ø FIFO£©¡£
-     * ============================================================ */
-//    for (int i = 0; i < 20; i++)
-//    {
-//        if (CAN_PollReceive() != 0)
-//            break;
-//        HAL_Delay(1);
-//    }
+    // è½®è¯¢æ¥æ”¶
+    CAN_PollReceive();
 
     HAL_Delay(1000);
   }
-  /* USER CODE END 3 */
-}
+  /* USER CODE END WHILE */
 
+  /* USER CODE BEGIN 3 */
+}
+/* USER CODE END 3 */
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
@@ -190,6 +194,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) { Error_Handler(); }
+
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
                                 RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
@@ -199,7 +204,165 @@ void SystemClock_Config(void)
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) { Error_Handler(); }
 }
 
-void Error_Handler(void) { __disable_irq(); while(1){} }
+/* USER CODE BEGIN 4 */
+// ==================== 4ä¸ªåè®®å‘é€å‡½æ•° ====================
+
+// 0x100 çº¬åº¦ (4B float å°ç«¯)
+uint8_t CAN_SendLatitude(float lat)
+{
+    uint8_t data[8] = {0};
+    PackFloatLE(lat, data);
+    return CAN_Send(0x100, data, 4);
+}
+
+// 0x101 ç»åº¦ (4B float å°ç«¯)
+uint8_t CAN_SendLongitude(float lon)
+{
+    uint8_t data[8] = {0};
+    PackFloatLE(lon, data);
+    return CAN_Send(0x101, data, 4);
+}
+
+// 0x102 è½¦é€Ÿ (2B int16 å¤§ç«¯)
+uint8_t CAN_SendSpeed(int16_t speed)
+{
+    uint8_t data[8] = {0};
+    PackInt16BE(speed, data);
+    return CAN_Send(0x102, data, 2);
+}
+
+// 0x103 æ¸©åº¦ (2B int16 å¤§ç«¯, éœ€ä¹˜ä»¥10)
+uint8_t CAN_SendTemperature(float temp)
+{
+    uint8_t data[8] = {0};
+    PackInt16BE((int16_t)(temp * 10.0f), data);
+    return CAN_Send(0x103, data, 2);
+}
+
+
+// ==================== æ¥æ”¶è§£æå‡½æ•° ====================
+void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data)
+{
+    printf("[RX] ID=0x%03X DLC=%d Data: ", rx_header->StdId, rx_header->DLC);
+    for (int i = 0; i < rx_header->DLC; i++) {
+        printf("%02X ", rx_data[i]);
+    }
+    printf(" -> ");
+
+    switch (rx_header->StdId)
+    {
+        case 0x100:
+            printf("lat = %.6f\r\n", UnpackFloatLE(rx_data));
+            break;
+        case 0x101:
+            printf("lon = %.6f\r\n", UnpackFloatLE(rx_data));
+            break;
+        case 0x102:
+            printf("speed = %d\r\n", UnpackInt16BE(rx_data));
+            break;
+        case 0x103:
+            printf("temp = %.1f\r\n", UnpackInt16BE(rx_data) / 10.0f);
+            break;
+        default:
+            printf("unknown ID\r\n");
+            break;
+    }
+}
+
+
+// ==================== å·¥å…·å‡½æ•°å®ç°åŒº ====================
+
+void ShowFloatBytes(const char *name, float v)
+{
+    union { float f; uint8_t b[4]; } u;
+    u.f = v;
+    printf("%s -> %02X %02X %02X %02X\r\n", name, u.b[0], u.b[1], u.b[2], u.b[3]);
+}
+
+uint8_t PackFloatLE(float v, uint8_t *out)
+{
+    union { float f; uint8_t b[4]; } u;
+    u.f = v;
+    out[0] = u.b[0]; out[1] = u.b[1];
+    out[2] = u.b[2]; out[3] = u.b[3];
+    return 4;
+}
+
+// å°ç«¯æ‰“åŒ… int16
+uint8_t PackInt16LE(int16_t v, uint8_t *out)
+{
+    out[0] = (uint8_t)(v & 0xFF);
+    out[1] = (uint8_t)((v >> 8) & 0xFF);
+    return 2;
+}
+
+// å¤§ç«¯æ‰“åŒ… int16
+uint8_t PackInt16BE(int16_t v, uint8_t *out)
+{
+    out[0] = (uint8_t)((v >> 8) & 0xFF);
+    out[1] = (uint8_t)(v & 0xFF);
+    return 2;
+}
+
+float UnpackFloatLE(const uint8_t *in)
+{
+    union { float f; uint8_t b[4]; } u;
+    u.b[0] = in[0]; u.b[1] = in[1];
+    u.b[2] = in[2]; u.b[3] = in[3];
+    return u.f;
+}
+
+// æ•…æ„ç”¨å¤§ç«¯è§£åŒ…, ç”¨äºå¯¹æ¯”é”™è¯¯å­—èŠ‚åº
+float UnpackFloatLE_WRONG(const uint8_t *in)
+{
+    float v; uint8_t tmp[4] = { in[3], in[2], in[1], in[0] };
+    memcpy(&v, tmp, 4);
+    return v;
+}
+
+// å°ç«¯è§£åŒ… int16
+int16_t UnpackInt16LE(const uint8_t *in)
+{
+    return (int16_t)((in[1] << 8) | in[0]);
+}
+
+// å¤§ç«¯è§£åŒ… int16
+int16_t UnpackInt16BE(const uint8_t *in)
+{
+    return (int16_t)((in[0] << 8) | in[1]);
+}
+
+void TestPackUnpack(void)
+{
+    uint8_t buf[8];
+    float  f_in = 23.123456f, f_out;
+    int16_t i_in = -50, i_out;
+
+    PackFloatLE(f_in, buf);
+    f_out = UnpackFloatLE(buf);
+    printf("float : %.6f -> %02X %02X %02X %02X -> %.6f  %s\r\n",
+           f_in, buf[0], buf[1], buf[2], buf[3], f_out,
+           (f_in == f_out) ? "OK" : "ERR");
+
+    // æ•…æ„ç”¨å¤§ç«¯è§£åŒ…, çœ‹é”™è¯¯å­—èŠ‚åºé•¿ä»€ä¹ˆæ ·
+    float f_wrong = UnpackFloatLE_WRONG(buf);
+    printf("wrong : %.6f -> %02X %02X %02X %02X -> %.6f  ERR!\r\n",
+           f_in, buf[0], buf[1], buf[2], buf[3], f_wrong);
+
+    // æµ‹è¯•å¤§ç«¯
+    PackInt16BE(i_in, buf);
+    i_out = UnpackInt16BE(buf);
+    printf("int16 BE: %d -> %02X %02X -> %d  %s\r\n",
+           i_in, buf[0], buf[1], i_out, (i_in == i_out) ? "OK" : "ERR");
+}
+/* USER CODE END 4 */
+
+void Error_Handler(void)
+{
+  __disable_irq();
+  while (1) { }
+}
+
 #ifdef USE_FULL_ASSERT
-void assert_failed(uint8_t *file, uint32_t line) {}
+void assert_failed(uint8_t *file, uint32_t line) { }
 #endif
