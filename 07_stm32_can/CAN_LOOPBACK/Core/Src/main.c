@@ -60,66 +60,71 @@ void CAN_Start(void)
     if (HAL_CAN_Start(&hcan) != HAL_OK)
         printf("[ERR] CAN_Start failed!\r\n");
 
-    HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
-    hcan.Instance->IER |= CAN_IER_FMPIE0;
+    /* ============================================================
+     * 【改动1】轮询模式：不开接收中断
+     * 中断和轮询会争抢同一个 FIFO：开了中断，帧一进 FIFO 就被
+     * 中断取走，主循环轮询永远读到 0。
+     * 等轮询版稳定后，再单独做中断版对照实验。
+     * ============================================================ */
+    /* HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING); */
 
-    printf("[INIT] BTR=0x%08lX MSG_PENDING=0x%08lX\r\n",
-           hcan.Instance->BTR, (uint32_t)CAN_IT_RX_FIFO0_MSG_PENDING);
-    
-        /* ===== 三个关键探针 ===== */
-    printf("[A] RF1R=0x%08lX (FMP1=%lu)\r\n",
-           hcan.Instance->RF1R, hcan.Instance->RF1R & 3U);
+    /* 开机横幅：一眼看出板子里跑的是哪一版 */
+    printf("\r\n===== CAN_LOOPBACK | Mode=%s | Filter=%s | NART=%s | RX=%s | Built %s %s =====\r\n",
+           (hcan.Init.Mode == CAN_MODE_LOOPBACK)    ? "LOOPBACK" : "NORMAL",
+           (filter.FilterActivation == ENABLE)      ? "ENABLE"   : "DISABLE",
+           (hcan.Init.AutoRetransmission == ENABLE) ? "ON"       : "OFF",
+           "POLL-NORMAL",
+           __DATE__, __TIME__);
 
-    printf("[B] FFA1R=0x%08lX (bit0=%lu -> 0:FIFO0  1:FIFO1)\r\n",
-           *(volatile uint32_t *)0x40006614U,
-           *(volatile uint32_t *)0x40006614U & 1U);
-
-    printf("[C] MCR=0x%08lX MSR=0x%08lX (INAK=%lu SLAK=%lu)\r\n",
-           hcan.Instance->MCR, hcan.Instance->MSR,
-           hcan.Instance->MSR & 1U, (hcan.Instance->MSR >> 1) & 1U);
+    printf("[INIT] BTR=0x%08lX IER=0x%08lX (IER=0 表示没开任何中断)\r\n",
+           hcan.Instance->BTR, hcan.Instance->IER);
 }
 
-void CAN_Send(uint32_t id, uint8_t *data, uint8_t len)
+/* 发送一帧。返回 0=成功，1=失败 */
+uint8_t CAN_Send(uint32_t id, uint8_t *data, uint8_t len)
 {
+    if (len > 8) return 1;              /* DLC 保护 */
+
     tx_header.StdId = id;
     tx_header.IDE   = CAN_ID_STD;
     tx_header.RTR   = CAN_RTR_DATA;
     tx_header.DLC   = len;
 
-    /* 等空邮箱（带超时，别死等） */
     uint32_t t0 = HAL_GetTick();
     while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0) {
-        if (HAL_GetTick() - t0 > 10) {
-            printf("[CAN] 邮箱满! 查: 对端上电? 波特率? 模式?\r\n");
-            return;
+        if (HAL_GetTick() - t0 > 10) {  /* 超时保护，别锁死 */
+            printf("[CAN] 邮箱满！查：对端上电？波特率？模式？\r\n");
+            return 1;
         }
     }
 
-    hcan.Instance->TSR = 0;                                    /* 清历史标志 */
-    if (HAL_CAN_AddTxMessage(&hcan, &tx_header, data, &tx_mailbox) != HAL_OK) {
-        printf("[CAN] AddTx 失败\r\n");
-        return;
-    }
-
-    /* 等本帧握手结束，再判 TXOK —— 只发一次，但等出结果 */
-    t0 = HAL_GetTick();
-    while ((hcan.Instance->TSR & 1U) == 0) {                    /* 等 RQCP0 */
-        if (HAL_GetTick() - t0 > 10) break;
-    }
-
-    printf("[D] TSR=0x%08lX TXOK0=%lu TERR0=%lu\r\n",
-           hcan.Instance->TSR,
-           (hcan.Instance->TSR >> 1) & 1U, (hcan.Instance->TSR >> 2) & 1U);
+    return (HAL_CAN_AddTxMessage(&hcan, &tx_header, data, &tx_mailbox) == HAL_OK) ? 0 : 1;
 }
 
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *can_h)
+/* ============================================================
+ * 【改动2】轮询接收：FIFO0 有帧就取出来打印
+ * 返回 1 = 取到一帧，返回 0 = 当前没有帧（不阻塞）
+ * ============================================================ */
+uint8_t CAN_PollReceive(void)
 {
     CAN_RxHeaderTypeDef rx_header;
     uint8_t rx_data[8];
-    HAL_CAN_GetRxMessage(can_h, CAN_RX_FIFO0, &rx_header, rx_data);
+
+    /* ① 先看 FIFO0 里有没有帧 —— 不依赖任何中断 */
+    if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) == 0)
+        return 0;
+
+    /* ② 有帧就取出来 */
+    if (HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &rx_header, rx_data) != HAL_OK)
+        return 0;
+
+    /* ③ 打印 */
     printf("[RX] ID=0x%03X DLC=%d Data:", rx_header.StdId, rx_header.DLC);
-    for (int i = 0; i < rx_header.DLC; i++) printf(" %02X", rx_data[i]);
+    for (int i = 0; i < rx_header.DLC; i++)
+        printf(" %02X", rx_data[i]);
     printf("\r\n");
+
+    return 1;
 }
 /* USER CODE END 0 */
 
@@ -144,33 +149,29 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   CAN_Start();
-  printf("=== CAN Loopback Test ===\r\n");
+  printf("=== CAN Loopback Test (polling RX) ===\r\n");
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
-    /* USER CODE BEGIN 3 */
-    uint8_t tx_data[8] = {0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88};
-    CAN_Send(0x100, tx_data, 8);
+    uint8_t tx_data[8] = {0x20, 0x23, 0x09, 0x14, 0x00, 0x00, 0x00, 0x00};
+
+    /* --- 发送 --- */
+    CAN_Send(0x100, tx_data, (uint8_t)8);
     printf("[TX] ID=0x100 sent\r\n");
 
-    printf("[DBG] IER=0x%08lX RF0R=0x%08lX BTR=0x%08lX\r\n",
-       hcan.Instance->IER, hcan.Instance->RF0R, hcan.Instance->BTR);
-
-    printf("[FLT] FA1R=0x%08lX FM1R=0x%08lX FS1R=0x%08lX F0R1=0x%08lX F0R2=0x%08lX\r\n",
-       *(volatile uint32_t *)0x4000661C,
-       *(volatile uint32_t *)0x40006604,
-       *(volatile uint32_t *)0x4000660C,
-       *(volatile uint32_t *)0x40006640,
-       *(volatile uint32_t *)0x40006644);
-
-    printf("[FMR] FMR=0x%08lX CAN2SB=%ld\r\n",
-       hcan.Instance->FMR, (hcan.Instance->FMR >> 8) & 0xFF);
-
-    if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0)
-        printf("[POLL] FIFO0 you zhen!\r\n");
+    /* ============================================================
+     * 【改动3】发送后主动轮询取帧
+     * 最多试 20 次 × 1ms = 20ms，取到就 break。
+     * 正常情况第 1 次就能取到（帧约 200us 后进 FIFO）。
+     * ============================================================ */
+//    for (int i = 0; i < 20; i++)
+//    {
+//        if (CAN_PollReceive() != 0)
+//            break;
+//        HAL_Delay(1);
+//    }
 
     HAL_Delay(1000);
   }
@@ -189,9 +190,10 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) { Error_Handler(); }
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK|RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
+                                RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) { Error_Handler(); }
