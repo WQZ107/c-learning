@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
@@ -54,6 +55,8 @@ void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data);
 
 /* USER CODE BEGIN 0 */
 // ==================== 重定向 printf 到 UART1 ====================
+#define FILTER_GPS_ONLY 1
+
 int fputc(int ch, FILE *f)
 {
     HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 100);
@@ -62,6 +65,7 @@ int fputc(int ch, FILE *f)
 
 CAN_TxHeaderTypeDef tx_header;
 uint32_t tx_mailbox;
+
 
 void CAN_Start(void)
 {
@@ -87,6 +91,8 @@ void CAN_Start(void)
            (hcan.Init.Mode == CAN_MODE_LOOPBACK) ? "LOOPBACK" : "NORMAL",
            (filter.FilterActivation == ENABLE) ? "ENABLE" : "DISABLE",
            __DATE__, __TIME__);
+    printf("[INIT] IER=0x%08lX BTR=0x%08lX RF0R=0x%08lX\r\n",
+           hcan.Instance->IER, hcan.Instance->BTR, hcan.Instance->RF0R);
 }
 
 uint8_t CAN_Send(uint32_t id, uint8_t *data, uint8_t len)
@@ -161,15 +167,26 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // 发送纬度 23.123456（4字节float 小端）
-    float lat = 23.123456f;
-    printf("[TX] 0x100 lat=%.6f\r\n", lat);
-    CAN_SendLatitude(lat);
+    // 1）造模拟数据：抖动才能看出来解析是活的（KP-C6）
+    float   lat = 23.123456f  + (rand() % 100) / 100000.0f;
+    float   lon = 113.123456f + (rand() % 100) / 100000.0f;
+    int16_t spd = (int16_t)(60 + rand() % 30);          //60 ~ 89
+    float   tmp = -5.0f + (rand() % 400) /10.0f;        //-5.0 ~ +34.9
+    printf("[TX] lat=%.6f lon=%.6f spd=%d tmp=%.1f\r\n", lat,lon,spd,tmp);
+      
+    /* 2) 协议表前 4 行，逐行发出去 */
+    CAN_SendLatitude(lat);      //0x100  DLC=4  小端
+    CAN_SendLongitude(lon);     //0x101  DLC=4  小端
+    CAN_SendSpeed(spd);         //0x102  DLC=2  大端
+    CAN_SendTemperature(tmp);   //0x103  DLC=2  大端
 
-    // 轮询接收
-    CAN_PollReceive();
+    /* 3) 接收窗口：把 FIFO 里的帧全部取走（P0 的修复） */
+    uint32_t t0 = HAL_GetTick();
+      while (HAL_GetTick() - t0 < 50) {         //先用50ms最稳
+          if (CAN_PollReceive() == 0) HAL_Delay(1);
+      }
 
-    HAL_Delay(1000);
+    HAL_Delay(1000);        //块E 会把它换成 HAL_GetTick 非阻塞调度
   }
   /* USER CODE END WHILE */
 
@@ -232,10 +249,13 @@ uint8_t CAN_SendSpeed(int16_t speed)
 }
 
 // 0x103 温度 (2B int16 大端, 需乘以10)
+/* (c) CAN_SendTemperature()：截断 -> 四舍五入（这个写法不用引 math.h） */
 uint8_t CAN_SendTemperature(float temp)
 {
     uint8_t data[8] = {0};
-    PackInt16BE((int16_t)(temp * 10.0f), data);
+    float   t10 = temp * 10.0f;     //25.68 -> 256.8
+    int16_t v   = (int16_t)(t10 + (t10 >= 0.0f ? 0.5f : -0.5f));    //-> 257
+    PackInt16BE(v, data);
     return CAN_Send(0x103, data, 2);
 }
 
@@ -299,11 +319,13 @@ uint8_t PackInt16LE(int16_t v, uint8_t *out)
 // 大端打包 int16
 uint8_t PackInt16BE(int16_t v, uint8_t *out)
 {
-    out[0] = (uint8_t)((v >> 8) & 0xFF);
-    out[1] = (uint8_t)(v & 0xFF);
+    uint16_t u = (uint16_t)v;       //-50 -> oxFFCE
+    out[0] = (uint8_t)((u >> 8) & 0xFF);
+    out[1] = (uint8_t)(u & 0xFF);
     return 2;
 }
 
+/* (b) PackInt16BE()：改成显式无符号，不依赖「负数右移」的实现定义 */
 float UnpackFloatLE(const uint8_t *in)
 {
     union { float f; uint8_t b[4]; } u;
@@ -337,6 +359,7 @@ void TestPackUnpack(void)
     uint8_t buf[8];
     float  f_in = 23.123456f, f_out;
     int16_t i_in = -50, i_out;
+    ShowFloatBytes("100.0f", 100.0f);       //应打印 00 00 C8 42
 
     PackFloatLE(f_in, buf);
     f_out = UnpackFloatLE(buf);
