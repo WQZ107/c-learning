@@ -1,3 +1,9 @@
+/* ★ 2026-09-23 块D Day③ 核对版（可直接替换工程 Core\Src\main.c）
+   相对原版的两处修正：
+   1) HAL_Delay(1000) -> rx_count += DrainRx(1000) 并挪到 [STAT] 之前
+      —— 命令帧不再憋 1 秒，收到立即回帧；命令帧也计入 rx 统计
+   2) 整理 case 0x200 缩进、更新过时注释（不影响功能）
+*/
 #include "main.h"
 #include "can.h"
 #include "usart.h"
@@ -63,6 +69,9 @@ int fputc(int ch, FILE *f)
 CAN_TxHeaderTypeDef tx_header;
 uint32_t tx_mailbox;
 
+/* 最新一帧数据：命令来了要回发它 */
+static float   g_lat, g_lon, g_tmp;
+static int16_t g_spd;
 
 void CAN_Start(void)
 {
@@ -202,9 +211,11 @@ int main(void)
     float   lon = 113.123456f + (rand() % 100) / 100000.0f;
     int16_t spd = (int16_t)(60 + rand() % 30);          /* 60 ~ 89 */
     float   tmp = -5.0f + (rand() % 400) / 10.0f;       /* -5.0 ~ +34.9 摄氏度 */
-    uint8_t probe[8] = {0xAA, 0xBB, 0, 0, 0, 0, 0, 0};
+    // uint8_t probe[8] = {0xAA, 0xBB, 0, 0, 0, 0, 0, 0};
 
     printf("[TX] lat=%.6f lon=%.6f spd=%d tmp=%.1f\r\n", lat, lon, spd, tmp);
+
+    g_lat = lat; g_lon = lon; g_spd = spd; g_tmp = tmp;
 
     /* ---- 2) 发一帧 -> 立刻取空一次（FIFO0 只有 3 格，不能让它堆积）---- */
     uint8_t tx_err   = 0;
@@ -218,15 +229,17 @@ int main(void)
     rx_count += DrainRx(3);
     if (CAN_SendTemperature(tmp)   != 0) tx_err |= (1U << 3);   /* bit3 = 0x103 */
     rx_count += DrainRx(3);
-    if (CAN_Send(0x200, probe, 2)  != 0) tx_err |= (1U << 4);   /* bit4 = 0x200 探针帧 */
+//    if (CAN_Send(0x200, probe, 2)  != 0) tx_err |= (1U << 4);   /* bit4 = 0x200 探针帧 */
     rx_count += DrainRx(5);                                     /* 最后一帧多给 2ms */
 
-    /* ---- 3) 统计：期望 5 帧 ----
-       刻意不打印 FOVR：读走一帧就会把 FOVR0 清掉，它只会误导你。
-       判据只用「期望 5 帧 vs 实收 rx 帧」。 */
-    printf("[STAT] rx=%d/5  tx_err=0x%02X\r\n", rx_count, tx_err);
+    /* ---- 3) 接收窗口 + 统计 ----
+       ★ 原版这里是 HAL_Delay(1000)：那 1 秒板子不收帧，PCAN 发来的 0x200 命令
+         要憋到下一轮才会被看到。改为 DrainRx(1000)：这一秒全程监听，命令 ≤1ms
+         被处理并回帧，命令帧也会计入 rx。
+       刻意不打印 FOVR：读走一帧就会把 FOVR0 清掉，它只会误导你。 */
+    rx_count += DrainRx(1000);
 
-    HAL_Delay(1000);
+    printf("[STAT] rx=%d  tx_err=0x%02X\r\n", rx_count, tx_err);
   }
   /* USER CODE END WHILE */
 
@@ -313,6 +326,17 @@ void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data)
         case 0x101: printf("lon = %.6f\r\n", UnpackFloatLE(rx_data));          break;
         case 0x102: printf("speed = %d\r\n", UnpackInt16BE(rx_data));          break;
         case 0x103: printf("temp = %.1f\r\n", UnpackInt16BE(rx_data) / 10.0f); break;
+        case 0x200:                        /* ★ 命令帧：PCAN 发 0x200 / 0x01 请求数据 */
+            if (rx_header->DLC >= 1 && rx_data[0] == 0x01) {
+                printf("cmd 0x200/01 -> reply latest data\r\n");
+                CAN_SendLatitude(g_lat);
+                CAN_SendLongitude(g_lon);
+                CAN_SendSpeed(g_spd);
+                CAN_SendTemperature(g_tmp);
+            } else {
+                printf("unknown command\r\n");
+            }
+            break;
         default:    printf("unknown ID\r\n");                                  break;
     }
 #else
@@ -324,6 +348,17 @@ void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data)
         case 0x101: printf("lon=%.6f\r\n", UnpackFloatLE(rx_data));           break;
         case 0x102: printf("spd=%d\r\n", UnpackInt16BE(rx_data));             break;
         case 0x103: printf("tmp=%.1f\r\n", UnpackInt16BE(rx_data) / 10.0f);   break;
+        case 0x200:                        /* ★ 命令帧：PCAN 发 0x200 / 0x01 请求数据 */
+            if (rx_header->DLC >= 1 && rx_data[0] == 0x01) {
+                printf("cmd 0x200/01 -> reply latest data\r\n");
+                CAN_SendLatitude(g_lat);
+                CAN_SendLongitude(g_lon);
+                CAN_SendSpeed(g_spd);
+                CAN_SendTemperature(g_tmp);
+            } else {
+                printf("unknown command\r\n");
+            }
+            break;
         default:    printf("unknown\r\n");                                     break;
     }
 #endif
