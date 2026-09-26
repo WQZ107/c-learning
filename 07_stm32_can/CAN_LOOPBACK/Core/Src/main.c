@@ -19,6 +19,20 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+//新增结构体
+typedef struct {
+    float   lat;        /* 0x100 纬度    float  小端          */
+    float   lon;        /* 0x101 经度    float  小端          */
+    int16_t speed;      /* 0x102 车速    int16  大端 km/h     */
+    int16_t temp_x10;   /* 0x103 温度x10 int16  大端 285=28.5C */
+    int16_t acc_x;      /* 0x104 加速度X  int16 大端 0.01g    */
+    int16_t acc_y;      /* 0x105 加速度Y  int16 大端 0.01g    */
+    int16_t acc_z;      /* 0x106 加速度Z  int16 大端 0.01g    */
+    uint8_t sat_num;    /* 0x107 数据[0] 卫星数               */
+    uint8_t alarm_flag; /* 0x107 数据[1] 告警标志              */
+}VehicleData;
+
+static VehicleData g_vehicle = { 23.123456f, 113.123456f, 60, 285, 0, 0, 0, 8, 0 };
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -44,11 +58,17 @@ void TestPackUnpack(void);
 uint8_t CAN_Send(uint32_t id, uint8_t *data, uint8_t len);
 uint8_t CAN_PollReceive(void);
 
-// ==================== 声明协议发送函数 ====================
-uint8_t CAN_SendLatitude(float lat);
-uint8_t CAN_SendLongitude(float lon);
-uint8_t CAN_SendSpeed(int16_t speed);
-uint8_t CAN_SendTemperature(float temp);
+// ==================== 声明协议发送函数 (块E day1 ：改为无参直读 g_vehicle)====================
+uint8_t CAN_SendLatitude(void);                          /* 0x100 float 小端      */
+uint8_t CAN_SendLongitude(void);                         /* 0x101 float 小端      */
+uint8_t CAN_SendSpeed(void);                             /* 0x102 int16 大端      */
+uint8_t CAN_SendTempX10(void);                           /* 0x103 int16 大端 x10  */
+uint8_t CAN_SendAccAxis(uint32_t id, int16_t acc_g100);  /* 0x104/105/106 共用    */
+uint8_t CAN_SendSatInfo(void);                           /* 0x107 卫星数+告警标志 */
+uint8_t CAN_ReportGps(void);                             /* 1秒组 4帧             */
+uint8_t CAN_ReportAcc(void);                             /* 100ms组 3帧(Day②用)   */
+uint8_t CAN_ReportAll(void);                             /* 整包 8帧              */
+void Sensor_Update(void);                                /* 模拟数据源(KP-E7)     */
 
 // ==================== 声明接收解析函数 ====================
 void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data);
@@ -67,11 +87,9 @@ int fputc(int ch, FILE *f)
 }
 
 CAN_TxHeaderTypeDef tx_header;
-uint32_t tx_mailbox;
 
-/* 最新一帧数据：命令来了要回发它 */
-static float   g_lat, g_lon, g_tmp;
-static int16_t g_spd;
+uint32_t tx_mailbox;
+/* ★ 旧散装全局 g_lat/g_lon/g_spd/g_tmp 已删除 —— 状态统一在 PV 区的 g_vehicle 里 */
 
 void CAN_Start(void)
 {
@@ -196,7 +214,7 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   CAN_Start();
-  printf("=== CAN Loopback Test (polling RX + DrainRx) ===\r\n");
+    printf("=== CAN Sensor Node (8-ID report) ===\r\n");
 
   // 执行打包解包测试
   TestPackUnpack();
@@ -206,40 +224,18 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* ---- 1) 造模拟数据（抖动）---- */
-    float   lat = 23.123456f  + (rand() % 100) / 100000.0f;
-    float   lon = 113.123456f + (rand() % 100) / 100000.0f;
-    int16_t spd = (int16_t)(60 + rand() % 30);          /* 60 ~ 89 */
-    float   tmp = -5.0f + (rand() % 400) / 10.0f;       /* -5.0 ~ +34.9 摄氏度 */
-    // uint8_t probe[8] = {0xAA, 0xBB, 0, 0, 0, 0, 0, 0};
-
-    printf("[TX] lat=%.6f lon=%.6f spd=%d tmp=%.1f\r\n", lat, lon, spd, tmp);
-
-    g_lat = lat; g_lon = lon; g_spd = spd; g_tmp = tmp;
-
-    /* ---- 2) 发一帧 -> 立刻取空一次（FIFO0 只有 3 格，不能让它堆积）---- */
-    uint8_t tx_err   = 0;
-    int     rx_count = 0;
-
-    if (CAN_SendLatitude(lat)      != 0) tx_err |= (1U << 0);   /* bit0 = 0x100 */
-    rx_count += DrainRx(3);
-    if (CAN_SendLongitude(lon)     != 0) tx_err |= (1U << 1);   /* bit1 = 0x101 */
-    rx_count += DrainRx(3);
-    if (CAN_SendSpeed(spd)         != 0) tx_err |= (1U << 2);   /* bit2 = 0x102 */
-    rx_count += DrainRx(3);
-    if (CAN_SendTemperature(tmp)   != 0) tx_err |= (1U << 3);   /* bit3 = 0x103 */
-    rx_count += DrainRx(3);
-//    if (CAN_Send(0x200, probe, 2)  != 0) tx_err |= (1U << 4);   /* bit4 = 0x200 探针帧 */
-    rx_count += DrainRx(5);                                     /* 最后一帧多给 2ms */
-
-    /* ---- 3) 接收窗口 + 统计 ----
-       ★ 原版这里是 HAL_Delay(1000)：那 1 秒板子不收帧，PCAN 发来的 0x200 命令
-         要憋到下一轮才会被看到。改为 DrainRx(1000)：这一秒全程监听，命令 ≤1ms
-         被处理并回帧，命令帧也会计入 rx。
-       刻意不打印 FOVR：读走一帧就会把 FOVR0 清掉，它只会误导你。 */
-    rx_count += DrainRx(1000);
-
-    printf("[STAT] rx=%d  tx_err=0x%02X\r\n", rx_count, tx_err);
+      /* ---- 1) 采集(模拟数据源, KP-E7) ---- */
+      Sensor_Update();
+      printf("[TX] lat=%.6f lon=%.6f spd=%d tmp=%.1f\r\n",
+      g_vehicle.lat, g_vehicle.lon, g_vehicle.speed, g_vehicle.temp_x10 / 10.0f);
+      
+      /* ---- 2) 整包上报 8 帧(KP-E6), 每帧后的 DrainRx(3) 就是帧间隔(KP-E3) ---- */
+      uint8_t tx_err = CAN_ReportAll();
+      
+      /* ---- 3) 1 秒监听窗口: 0x200 命令随到随回 ---- */
+      int rx_count = DrainRx(1000);
+      
+      printf("[STAT] rx=%d tx_err=0x%02X\r\n",rx_count,tx_err);
   }
   /* USER CODE END WHILE */
 
@@ -275,42 +271,128 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-// ==================== 4 个协议发送函数 ====================
-
+// ==================== 协议发送层(KP-E1/E2: 直读 g_vehicle, 无参) ====================
 // 0x100 纬度 (4B float 小端)
-uint8_t CAN_SendLatitude(float lat)
+uint8_t CAN_SendLatitude(void)
 {
     uint8_t data[8] = {0};
-    PackFloatLE(lat, data);
+    PackFloatLE(g_vehicle.lat, data);
     return CAN_Send(0x100, data, 4);
 }
 
 // 0x101 经度 (4B float 小端)
-uint8_t CAN_SendLongitude(float lon)
+uint8_t CAN_SendLongitude(void)
 {
     uint8_t data[8] = {0};
-    PackFloatLE(lon, data);
+    PackFloatLE(g_vehicle.lon, data);
     return CAN_Send(0x101, data, 4);
 }
 
 // 0x102 车速 (2B int16 大端)
-uint8_t CAN_SendSpeed(int16_t speed)
+uint8_t CAN_SendSpeed(void)
 {
     uint8_t data[8] = {0};
-    PackInt16BE(speed, data);
+    PackInt16BE(g_vehicle.speed, data);
     return CAN_Send(0x102, data, 2);
 }
 
-// 0x103 温度 (2B int16 大端, 需乘以 10)
-uint8_t CAN_SendTemperature(float temp)
+// 0x103 温度 (2B int16 大端, 结构体里已是 x10 整数, 不再四舍五入)
+uint8_t CAN_SendTempX10(void)
 {
     uint8_t data[8] = {0};
-    float   t10 = temp * 10.0f;                                  /* 25.68 -> 256.8 */
-    int16_t v   = (int16_t)(t10 + (t10 >= 0.0f ? 0.5f : -0.5f)); /* 截断 -> 四舍五入 -> 257 */
-    PackInt16BE(v, data);
+    PackInt16BE(g_vehicle.temp_x10, data);
     return CAN_Send(0x103, data, 2);
 }
 
+// 0x104/0x105/0x106 加速度 XYZ 共用 (2B int16 大端, 单位 0.01g)
+uint8_t CAN_SendAccAxis(uint32_t id, int16_t acc_g100)
+{
+    uint8_t data[8] = {0};
+    PackInt16BE(acc_g100, data);
+    return CAN_Send(id, data, 2);
+}
+
+// 0x107 卫星数 + 告警标志 (2B: data[0]=卫星数, data[1]=标志)
+uint8_t CAN_SendSatInfo(void)
+{
+    uint8_t data[8] = {0};
+    data[0] = g_vehicle.sat_num;
+    data[1] = g_vehicle.alarm_flag;
+    return CAN_Send(0x107, data, 2);
+}
+
+// ==================== ★ 分组上报(KP-E6) ====================
+
+/* 1 秒组 4 帧: 0x100/0x101/0x102/0x107 —— 返回错误位图 bit0~3 */
+uint8_t CAN_ReportGps(void)
+{
+    uint8_t err = 0;
+    if (CAN_SendLatitude()  != 0) err |= (1U << 0);
+    DrainRx(3);                                   /* 帧间隔 + FIFO防积压(KP-E3) */
+    if (CAN_SendLongitude() != 0) err |= (1U << 1);
+    DrainRx(3);
+    if (CAN_SendSpeed()     != 0) err |= (1U << 2);
+    DrainRx(3);
+    if (CAN_SendSatInfo()   != 0) err |= (1U << 3);
+    DrainRx(3);
+    return err;
+}
+
+/* 100ms 组 3 帧: 0x104/0x105/0x106 —— 返回错误位图 bit0~2 (Day② 调度用) */
+uint8_t CAN_ReportAcc(void)
+{
+    uint8_t err = 0;
+    if (CAN_SendAccAxis(0x104, g_vehicle.acc_x) != 0) err |= (1U << 0);
+    DrainRx(3);
+    if (CAN_SendAccAxis(0x105, g_vehicle.acc_y) != 0) err |= (1U << 1);
+    DrainRx(3);
+    if (CAN_SendAccAxis(0x106, g_vehicle.acc_z) != 0) err |= (1U << 2);
+    DrainRx(3);
+    return err;
+}
+
+/* ★ 整包 8 帧: bit0~3=GPS组, bit4=温度, bit5~7=加速度组 */
+uint8_t CAN_ReportAll(void)
+{
+    uint8_t err = CAN_ReportGps();
+    if (CAN_SendTempX10() != 0) err |= (1U << 4);
+    DrainRx(3);
+    err |= (uint8_t)(CAN_ReportAcc() << 5);
+    return err;
+}
+
+// ==================== ★ 模拟数据源(KP-E7: Day46 换真传感器只动这一段) ====================
+
+void UpdateGps(void)
+{
+    g_vehicle.lat += (rand() % 10 - 5) / 100000.0f;   /* ±0.00005 漂移 */
+    g_vehicle.lon += (rand() % 10 - 5) / 100000.0f;
+    g_vehicle.speed += (rand() % 7 - 3);              /* ±3 km/h */
+    if (g_vehicle.speed < 0)   g_vehicle.speed = 0;
+    if (g_vehicle.speed > 120) g_vehicle.speed = 120;
+}
+
+void UpdateTemp(void)
+{
+    g_vehicle.temp_x10 += (rand() % 5 - 2);           /* ±0.2C */
+    if (g_vehicle.temp_x10 < 150) g_vehicle.temp_x10 = 150;   /* 15.0C 下限 */
+    if (g_vehicle.temp_x10 > 450) g_vehicle.temp_x10 = 450;   /* 45.0C 上限 */
+}
+
+void UpdateAcc(void)
+{
+    g_vehicle.acc_x = g_vehicle.acc_x * 9 / 10 + (rand() % 21 - 10);   /* 回中 + ±0.10g 抖动 */
+    g_vehicle.acc_y = g_vehicle.acc_y * 9 / 10 + (rand() % 21 - 10);
+    g_vehicle.acc_z = g_vehicle.acc_z * 9 / 10 + (rand() % 21 - 10);
+}
+
+/* 一次全更新(Day② 会拆成三档分别调用) */
+void Sensor_Update(void)
+{
+    UpdateGps();
+    UpdateAcc();
+    UpdateTemp();
+}
 
 // ==================== 接收解析函数 ====================
 void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data)
@@ -329,10 +411,10 @@ void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data)
         case 0x200:                        /* ★ 命令帧：PCAN 发 0x200 / 0x01 请求数据 */
             if (rx_header->DLC >= 1 && rx_data[0] == 0x01) {
                 printf("cmd 0x200/01 -> reply latest data\r\n");
-                CAN_SendLatitude(g_lat);
-                CAN_SendLongitude(g_lon);
-                CAN_SendSpeed(g_spd);
-                CAN_SendTemperature(g_tmp);
+                CAN_SendLatitude();
+                CAN_SendLongitude();
+                CAN_SendSpeed();
+                CAN_SendTempX10();
             } else {
                 printf("unknown command\r\n");
             }
