@@ -69,6 +69,12 @@ uint8_t CAN_ReportGps(void);                             /* 1秒组 4帧        
 uint8_t CAN_ReportAcc(void);                             /* 100ms组 3帧(Day②用)   */
 uint8_t CAN_ReportAll(void);                             /* 整包 8帧              */
 void Sensor_Update(void);                                /* 模拟数据源(KP-E7)     */
+// ==================== ★ Day② 新增: 数据源分档 + 按键 + 告警 ====================
+void Key_Init(void);                //KEY0=PE4输入
+void UpdateGps(void);               /* 下面三个改由 main 调度直接调 */
+void UpdateAcc(void);
+void UpdateTemp(void);
+uint8_t CAN_SendAlarm(int16_t acc_g100);         /* 0x300 事件帧 */
 
 // ==================== 声明接收解析函数 ====================
 void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data);
@@ -187,6 +193,47 @@ static uint8_t DrainRx(uint32_t ms)
     }
     return n;
 }
+/* ==================== ★ Day② 新增: KEY0 与急刹判据 ==================== */
+
+/* KEY0 = PE4, 按下=低。★ 工程原本只开了 GPIOA 时钟, PE 必须自己开!
+   (不调 Key_Init 就读 PE4: GPIOE 时钟未开读回 0 = 被当成"永远按下") */
+
+void Key_Init(void)
+{
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    
+    GPIO_InitTypeDef g = {0};
+    g.Pin   = GPIO_PIN_4;
+    g.Mode  = GPIO_MODE_INPUT;
+    g.Pull  = GPIO_PULLUP;      //按下低电平
+    HAL_GPIO_Init(GPIOE,&g);
+}
+
+/* 整数开方(牛顿迭代) —— 免 math.h 依赖, 合加速度 = √(x²+y²+z²) */
+static int32_t isqrt32(int32_t x)
+{
+    int32_t r = x;
+    if (x <= 0) return 0;
+    for (;;) {
+        int32_t nr = (r + x / r) / 2;
+        if (nr >= r) return r;          /* 收敛到 floor(sqrt(x)) */
+        r = nr;
+    }
+}
+
+/* 急刹判据: 返回合加速度平方(单位 (0.01g)²)。
+   >1.8g  ⟺  平方和 > 180² = 32400 (不开方就能判, 嵌入式常用技巧)
+   KEY0 按下 = 强制注入 -2.00g, 验收时按一下必出告警 */
+static int32_t BrakeAccSq100(void)
+{
+    if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4) == GPIO_PIN_RESET) {
+        g_vehicle.acc_x = -200;         /* 注入 -2.00g */
+    }
+    return (int32_t)g_vehicle.acc_x * g_vehicle.acc_x
+         + (int32_t)g_vehicle.acc_y * g_vehicle.acc_y
+         + (int32_t)g_vehicle.acc_z * g_vehicle.acc_z;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -214,28 +261,73 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   CAN_Start();
-    printf("=== CAN Sensor Node (8-ID report) ===\r\n");
+    printf("=== CAN Sensor Node ((multi-rate + alarm)) ===\r\n");
 
   // 执行打包解包测试
   TestPackUnpack();
+  Key_Init();               /* ★ KEY0 就绪(必须在读 PE4 之前) */
+  
+   /* ★ 分周期调度的状态变量 —— 必须放在 while(1) 之前! */
+  uint32_t t_acc = 0,t_gps = 0,t_temp = 0;  /* 三档节拍 */
+  uint32_t t_alarm = 0,t_stat = 0;          /* 告警冷却 / 统计节拍 */
+  uint8_t  err_gps = 0,err_acc = 0,err_tmp = 0;     /* 本秒发送错误累计 */
+  int      rx_cnt  = 0;
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
-  {
-      /* ---- 1) 采集(模拟数据源, KP-E7) ---- */
-      Sensor_Update();
-      printf("[TX] lat=%.6f lon=%.6f spd=%d tmp=%.1f\r\n",
-      g_vehicle.lat, g_vehicle.lon, g_vehicle.speed, g_vehicle.temp_x10 / 10.0f);
-      
-      /* ---- 2) 整包上报 8 帧(KP-E6), 每帧后的 DrainRx(3) 就是帧间隔(KP-E3) ---- */
-      uint8_t tx_err = CAN_ReportAll();
-      
-      /* ---- 3) 1 秒监听窗口: 0x200 命令随到随回 ---- */
-      int rx_count = DrainRx(1000);
-      
-      printf("[STAT] rx=%d tx_err=0x%02X\r\n",rx_count,tx_err);
+        {
+    uint32_t now = HAL_GetTick();                   /* ★ 时间基准每圈取一次 */
+
+    /* ---- 100ms 档: 加速度 3 帧 ---- */
+    if (now - t_acc >= 100) {
+        t_acc = now;
+        UpdateAcc();
+        err_acc |= CAN_ReportAcc();
+    }
+
+    /* ---- 1s 档: GPS类 + 车速 + 卫星 4 帧 ---- */
+    if (now - t_gps >= 1000) {
+        t_gps = now;
+        UpdateGps();
+        printf("[TX] lat=%.6f lon=%.6f spd=%d sat=%d flag=%d\r\n",
+               g_vehicle.lat, g_vehicle.lon, g_vehicle.speed,
+               g_vehicle.sat_num, g_vehicle.alarm_flag);
+        err_gps |= CAN_ReportGps();
+    }
+
+    /* ---- 2s 档: 温度 1 帧 ---- */
+    if (now - t_temp >= 2000) {
+        t_temp = now;
+        UpdateTemp();
+        if (CAN_SendTempX10() != 0) err_tmp = 1;
+        DrainRx(3);
+    }
+
+    /* ---- 事件档: 急刹 → 0x300(平时不发, KP-E5); 1 秒冷却防连发 ---- */
+    int32_t sq = BrakeAccSq100();
+    if (sq > 32400L && (now - t_alarm >= 1000)) {
+        t_alarm = now;
+        g_vehicle.alarm_flag = 1;
+        CAN_SendAlarm((int16_t)isqrt32(sq));
+        printf("[ALARM] 0x300 sent, acc=%d.%02dg\r\n", isqrt32(sq) / 100, isqrt32(sq) % 100);
+    }
+    if (g_vehicle.alarm_flag != 0 && (now - t_alarm >= 5000)) {
+        g_vehicle.alarm_flag = 0;                   /* 告警标志 5 秒后自动清除 */
+    }
+
+    /* ---- 接收窗口常开: 0x200 命令随到随回 ---- */
+    rx_cnt += DrainRx(1);
+
+    /* ---- 每秒一次统计(替代原 [STAT] 节奏) ---- */
+    if (now - t_stat >= 1000) {
+        t_stat = now;
+        printf("[STAT] rx=%d err_gps=0x%02X err_acc=0x%02X err_tmp=%u\r\n",
+               rx_cnt, err_gps, err_acc, err_tmp);
+        rx_cnt = 0; err_gps = 0; err_acc = 0; err_tmp = 0;
+    }
   }
   /* USER CODE END WHILE */
 
@@ -321,6 +413,14 @@ uint8_t CAN_SendSatInfo(void)
     return CAN_Send(0x107, data, 2);
 }
 
+// ★ 0x300 告警帧 (2B int16 大端, 数据 = 合加速度 x100) —— 事件触发, KP-E5
+uint8_t CAN_SendAlarm(int16_t acc_g100)
+{
+    uint8_t data[8] = {0};
+    PackInt16BE(acc_g100,data);
+    return CAN_Send(0x300,data,2);
+}
+
 // ==================== ★ 分组上报(KP-E6) ====================
 
 /* 1 秒组 4 帧: 0x100/0x101/0x102/0x107 —— 返回错误位图 bit0~3 */
@@ -384,6 +484,11 @@ void UpdateAcc(void)
     g_vehicle.acc_x = g_vehicle.acc_x * 9 / 10 + (rand() % 21 - 10);   /* 回中 + ±0.10g 抖动 */
     g_vehicle.acc_y = g_vehicle.acc_y * 9 / 10 + (rand() % 21 - 10);
     g_vehicle.acc_z = g_vehicle.acc_z * 9 / 10 + (rand() % 21 - 10);
+    
+    /* ★ 约 1% 概率自然急刹模拟(100ms一档 ≈ 每10秒一次), 告警不必只靠按键 */
+    if(rand() % 100 == 0) {
+        g_vehicle.acc_x = -(120 + rand() % 81);
+    }
 }
 
 /* 一次全更新(Day② 会拆成三档分别调用) */
