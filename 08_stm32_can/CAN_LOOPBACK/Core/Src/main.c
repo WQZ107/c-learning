@@ -1,4 +1,4 @@
-﻿/* ★ 2026-09-23 块D Day③ 核对版（可直接替换工程 Core\Src\main.c）
+/* ★ 2026-09-23 块D Day③ 核对版（可直接替换工程 Core\Src\main.c）
    相对原版的两处修正：
    1) HAL_Delay(1000) -> rx_count += DrainRx(1000) 并挪到 [STAT] 之前
       —— 命令帧不再憋 1 秒，收到立即回帧；命令帧也计入 rx 统计
@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include "gps_nmea.h"
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
@@ -279,6 +280,7 @@ int main(void)
 
   // 执行打包解包测试
   TestPackUnpack();
+  TestNmea();
   Key_Init();               /* ★ KEY0 就绪(必须在读 PE4 之前) */
   
    /* ★ 分周期调度的状态变量 —— 必须放在 while(1) 之前! */
