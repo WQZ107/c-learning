@@ -16,6 +16,6 @@ extern GPS_Data g_gps;
 void GPS_ParseLine(const char *line);
 void TestNmea(void);
 void GPS_UART_Init(UART_HandleTypeDef *huart);  /* Day50 ”√ */
-uint8_t GPS_PopLine(char **out);                /* Day50 ”√ */
+uint8_t GPS_PopLine(char *out, int outlen);
 
 #endif

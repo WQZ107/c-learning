@@ -283,6 +283,10 @@ int main(void)
   TestNmea();
   Key_Init();               /* ★ KEY0 就绪(必须在读 PE4 之前) */
   
+  #if GPS_TEST
+  GPS_UART_Init(&huart2);   /* ★块G Day50:启动GPS串口中断接收 */
+#endif
+  
    /* ★ 分周期调度的状态变量 —— 必须放在 while(1) 之前! */
 #if !GPS_TEST
   uint32_t t_acc = 0,t_gps = 0,t_temp = 0;  /* 三档节拍 */
@@ -299,9 +303,14 @@ int main(void)
         {
 #if GPS_TEST
     /* ---- ★块F GPS透传测试: USART2(9600)收到什么, 原样从 USART1(115200) 打出 ---- */
-    uint8_t ch;
-    if (HAL_UART_Receive(&huart2, &ch, 1, 100) == HAL_OK)
-        printf("%c", ch);
+            char line[100];
+    if (GPS_PopLine(line, sizeof(line))) {
+        printf("RAW:%s\r\n", line);          /* 原始语句:人工对数用 */
+        GPS_ParseLine(line);
+        printf("[GPS] valid=%d lat=%.6f lon=%.6f spd=%.1f sat=%d\r\n",
+               g_gps.valid, g_gps.latitude, g_gps.longitude,
+               g_gps.speed_kmh, g_gps.satellites);
+    }
 #else
     uint32_t now = HAL_GetTick();                   /* ★ 时间基准每圈取一次 */
 
