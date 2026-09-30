@@ -1,4 +1,4 @@
-﻿/* ★ 2026-09-23 块D Day③ 核对版（可直接替换工程 Core\Src\main.c）
+/* ★ 2026-09-23 块D Day③ 核对版（可直接替换工程 Core\Src\main.c）
    相对原版的两处修正：
    1) HAL_Delay(1000) -> rx_count += DrainRx(1000) 并挪到 [STAT] 之前
       —— 命令帧不再憋 1 秒，收到立即回帧；命令帧也计入 rx 统计
@@ -285,6 +285,8 @@ int main(void)
   TestPackUnpack();
   TestNmea();
   I2C_Scan();               /* ★块H Day51:I2C 总线普查 */
+    if (MPU6050_Init() != 0)
+      printf("[MPU] init FAILED - check wiring\r\n");   /* 失败只报警,不死机 */
   Key_Init();               /* ★ KEY0 就绪(必须在读 PE4 之前) */
   
   #if GPS_TEST
@@ -307,6 +309,13 @@ int main(void)
         {
 #if GPS_TEST
     /* ---- ★块F GPS透传测试: USART2(9600)收到什么, 原样从 USART1(115200) 打出 ---- */
+                static uint32_t t_mpu = 0;
+    int16_t ax, ay, az;
+    if (HAL_GetTick() - t_mpu >= 500) {      /* 500ms 一拍,非阻塞 */
+        t_mpu = HAL_GetTick();
+        MPU6050_ReadAccel(&ax, &ay, &az);
+        printf("[MPU] ax=%6d ay=%6d az=%6d\r\n", ax, ay, az);
+    }
             char line[100];
     if (GPS_PopLine(line, sizeof(line))) {
         printf("RAW:%s\r\n", line);          /* 原始语句:人工对数用 */
