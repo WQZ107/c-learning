@@ -87,7 +87,7 @@ void CAN_ProcessRx(CAN_RxHeaderTypeDef *rx_header, uint8_t *rx_data);
 // ==================== 实验开关 ====================
 #define FILTER_GPS_ONLY   0      /* 0 = 过滤器全通过（块D 用）；1 = 只放行 0x100~0x103 */
 #define RX_PRINT_FULL     1      /* 1 = 完整打印（约 5ms/行）；0 = 精简打印（约 2.2ms/行）*/
-#define GPS_TEST          1      /* ★块F: 1 = GPS透传测试(USART2收->USART1打); 0 = 恢复正常CAN业务 */
+#define GPS_TEST          0      /* ★块F: 1 = GPS透传测试(USART2收->USART1打); 0 = 恢复正常CAN业务 */
 
 // ==================== 重定向 printf 到 UART1 ====================
 int fputc(int ch, FILE *f)
@@ -289,9 +289,7 @@ int main(void)
       printf("[MPU] init FAILED - check wiring\r\n");   /* 失败只报警,不死机 */
   Key_Init();               /* ★ KEY0 就绪(必须在读 PE4 之前) */
   
-  #if GPS_TEST
-  GPS_UART_Init(&huart2);   /* ★块G Day50:启动GPS串口中断接收 */
-#endif
+  GPS_UART_Init(&huart2);   /* ★块I:GPS中断拼行常驻,g_gps 持续更新 */
   
    /* ★ 分周期调度的状态变量 —— 必须放在 while(1) 之前! */
 #if !GPS_TEST
@@ -365,6 +363,11 @@ int main(void)
     }
 
     /* ---- 接收窗口常开: 0x200 命令随到随回 ---- */
+        /* GPS 行解析:有行就喂(守卫在 parse_rmc 内),V 状态自动跳过 */
+    char line[100];
+    if (GPS_PopLine(line, sizeof(line)))
+        GPS_ParseLine(line);
+    
     rx_cnt += DrainRx(1);
 
     /* ---- 每秒一次统计(替代原 [STAT] 节奏) ---- */
@@ -512,11 +515,12 @@ uint8_t CAN_ReportAll(void)
 
 void UpdateGps(void)
 {
-    g_vehicle.lat += (rand() % 10 - 5) / 100000.0f;   /* ±0.00005 漂移 */
-    g_vehicle.lon += (rand() % 10 - 5) / 100000.0f;
-    g_vehicle.speed += (rand() % 7 - 3);              /* ±3 km/h */
-    if (g_vehicle.speed < 0)   g_vehicle.speed = 0;
-    if (g_vehicle.speed > 120) g_vehicle.speed = 120;
+    /* 块I:从 g_gps(块G 解析结果)拷真值——守卫已在 parse_rmc 里做过 */
+    g_vehicle.lat   = (float)g_gps.latitude;
+    g_vehicle.lon   = (float)g_gps.longitude;
+    g_vehicle.speed = (int16_t)g_gps.speed_kmh;
+    g_vehicle.sat_num = g_gps.satellites;
+    /* alarm_flag 仍由告警逻辑管理,这里不动 */
 }
 
 void UpdateTemp(void)
@@ -528,14 +532,14 @@ void UpdateTemp(void)
 
 void UpdateAcc(void)
 {
-    g_vehicle.acc_x = g_vehicle.acc_x * 9 / 10 + (rand() % 21 - 10);   /* 回中 + ±0.10g 抖动 */
-    g_vehicle.acc_y = g_vehicle.acc_y * 9 / 10 + (rand() % 21 - 10);
-    g_vehicle.acc_z = g_vehicle.acc_z * 9 / 10 + (rand() % 21 - 10);
-    
-    /* ★ 约 1% 概率自然急刹模拟(100ms一档 ≈ 每10秒一次), 告警不必只靠按键 */
-    if(rand() % 100 == 0) {
-        g_vehicle.acc_x = -(120 + rand() % 81);
-    }
+    int16_t ax, ay, az;
+    MPU6050_ReadAccel(&ax, &ay, &az);          /* 块H 驱动:原始值,16384=1g */
+
+    /* 原始值 → 块E 协议单位 0.01g:raw×100÷16384(int32 中间量防溢出) */
+    g_vehicle.acc_x = (int16_t)(((int32_t)ax * 100) / 16384);
+    g_vehicle.acc_y = (int16_t)(((int32_t)ay * 100) / 16384);
+    g_vehicle.acc_z = (int16_t)(((int32_t)az * 100) / 16384);
+    /* KEY0 强制注入 -2.00g 的功能保留着(BrakeAccSq100 里),验收照样能按 */
 }
 
 /* 一次全更新(Day② 会拆成三档分别调用) */
