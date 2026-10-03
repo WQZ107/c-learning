@@ -1,8 +1,8 @@
-#include "mpu6050.h"
+ï»¿#include "mpu6050.h"
 #include "i2c.h"
 #include <stdio.h>
 
-/* I2C ×ÜÏßÆÕ²é:1~127 °¤¸öÇÃÃÅ,Ó¦´ğµÄ±¨³öµØÖ· */
+/* I2C æ€»çº¿æ™®æŸ¥:1~127 æŒ¨ä¸ªæ•²é—¨,åº”ç­”çš„æŠ¥å‡ºåœ°å€ */
 void I2C_Scan(void)
 {
     printf("[SCAN] I2C bus online:");
@@ -13,44 +13,47 @@ void I2C_Scan(void)
     printf("\r\n");
 }
 
-/* ============ Day52:Èı²½ÇúÇı¶¯ ============ */
+/* ============ Day52:ä¸‰æ­¥æ›²é©±åŠ¨ ============ */
 
-/* Èı²½Çú:È·ÈÏÔÚÏß ¡ú »½ĞÑ ¡ú ÅäÁ¿³Ì¡£·µ»Ø 0=³É¹¦,-1=Ã»ÕÒµ½ */
+/* ä¸‰æ­¥æ›²:ç¡®è®¤åœ¨çº¿ â†’ å”¤é†’ â†’ é…é‡ç¨‹ã€‚è¿”å› 0=æˆåŠŸ,-1=æ²¡æ‰¾åˆ° */
 int MPU6050_Init(void)
 {
     uint8_t who = 0, zero = 0;
 
-    /* ¡ª¡ª µÚÒ»²½:¶ÁÉí·İÖ¤(0x75)¡ª¡ª */
+    /* â€”â€” ç¬¬ä¸€æ­¥:è¯»èº«ä»½è¯(0x75)â€”â€” */
     if (HAL_I2C_Mem_Read(&hi2c1, MPU6050_ADDR, MPU6050_WHO_AM_I,
                          I2C_MEMADD_SIZE_8BIT, &who, 1, 100) != HAL_OK)
-        return -1;                          /* ×ÜÏßÉÏÎŞÈËÓ¦´ğ=½ÓÏß/µØÖ·´í */
+        return -1;                          /* æ€»çº¿ä¸Šæ— äººåº”ç­”=æ¥çº¿/åœ°å€é”™ */
     printf("[MPU] WHO_AM_I=0x%02X ", who);
     if      (who == 0x68) printf("(genuine MPU-60x0)\r\n");
     else if (who == 0x70) printf("(MPU-6500 family clone, regs compatible, go on)\r\n");
     else if (who == 0x98) printf("(fake chip, regs compatible, go on)\r\n");
     else                  printf("(unknown, try anyway)\r\n");
-    /* ÊÖ²á:¼æÈİĞ¾Æ¬¼Ä´æÆ÷Í¨ÓÃ,Ğ£ÑéÊ§°Ü²»ËÀ¿Ä,Ö±½ÓÍùÏÂ×ß */
+    /* æ‰‹å†Œ:å…¼å®¹èŠ¯ç‰‡å¯„å­˜å™¨é€šç”¨,æ ¡éªŒå¤±è´¥ä¸æ­»ç£•,ç›´æ¥å¾€ä¸‹èµ° */
 
-    /* ¡ª¡ª µÚ¶ş²½:½ĞĞÑ(0x6B Ğ´ 0)¡ª¡ª */
+    /* â€”â€” ç¬¬äºŒæ­¥:å«é†’(0x6B å†™ 0)â€”â€” */
     if (HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, MPU6050_PWR_MGMT,
                           I2C_MEMADD_SIZE_8BIT, &zero, 1, 100) != HAL_OK)
         return -1;
-    HAL_Delay(50);                          /* ĞÑÁË¸ø 50ms ÄÚ²¿Ê±ÖÓÎÈ¶¨ */
+    HAL_Delay(50);                          /* é†’äº†ç»™ 50ms å†…éƒ¨æ—¶é’Ÿç¨³å®š */
 
-    /* ¡ª¡ª µÚÈı²½:¶¨¹æ¾Ø(Á¿³Ì)¡ª¡ª */
+    /* â€”â€” ç¬¬ä¸‰æ­¥:å®šè§„çŸ©(é‡ç¨‹)â€”â€” */
     HAL_I2C_Mem_Write(&hi2c1, MPU6050_ADDR, MPU6050_ACCEL_CFG,
-                      I2C_MEMADD_SIZE_8BIT, &zero, 1, 100);   /* 0x1C=0 ¡ú ¡À2g */
+                      I2C_MEMADD_SIZE_8BIT, &zero, 1, 100);   /* 0x1C=0 â†’ Â±2g */
     printf("[MPU] init OK (awake, accel +-2g)\r\n");
     return 0;
 }
 
-/* ´Ó 0x3B Á¬¶Á 6 ×Ö½Ú = X¸ß XµÍ Y¸ß YµÍ Z¸ß ZµÍ */
+/* ä» 0x3B è¿è¯» 6 å­—èŠ‚ = Xé«˜ Xä½ Yé«˜ Yä½ Zé«˜ Zä½ */
 void MPU6050_ReadAccel(int16_t *ax, int16_t *ay, int16_t *az)
 {
     uint8_t buf[6];
     if (HAL_I2C_Mem_Read(&hi2c1, MPU6050_ADDR, MPU6050_ACCEL_XOUT,
-                         I2C_MEMADD_SIZE_8BIT, buf, 6, 100) != HAL_OK)
-        return;                             /* ¶ÁÊ§°Ü:±£ÁôÉÏ´Î¾ÉÖµ */
+                         I2C_MEMADD_SIZE_8BIT, buf, 6, 100) != HAL_OK) {
+        *ax = *ay = *az = 0;   /* â˜…è¯»å¤±è´¥æ¸…é›¶:è°ƒç”¨æ–¹å±€éƒ¨å˜é‡æœªåˆå§‹åŒ–,
+                                   ä¸æ¸…é›¶ä¼šæŠŠæ ˆåƒåœ¾å†™è¿› g_vehicle(å—I å®æµ‹bug) */
+        return;
+    }
     *ax = (int16_t)((buf[0] << 8) | buf[1]);
     *ay = (int16_t)((buf[2] << 8) | buf[3]);
     *az = (int16_t)((buf[4] << 8) | buf[5]);

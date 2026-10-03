@@ -12,14 +12,17 @@ def s16(b):                                    # 0x102/104~106/300:int16 大端
     return v - 0x10000 if v >= 0x8000 else v
 
 PATTERNS = [
-    re.compile(r'([0-9A-Fa-f]{2,8})h\s+\[\s*(\d+)\s*\]\s*((?:[0-9A-Fa-f]{2}[\s:]+)+)'),  # 复制文本格式
-    re.compile(r'([0-9A-Fa-f]{2,8})h\s+(?:Rx|Tx)\s+(\d)\s+((?:[0-9A-Fa-f]{2}\s+)+)'),      # trc v2.x
-    re.compile(r'Rx\s+([0-9A-Fa-f]{2,8})h\s+(\d)\s+((?:[0-9A-Fa-f]{2}\s+)+)'),              # trc v1.1
+    # PCAN-View trc v1.1:  "    1)   12.0  Rx   0104  2  FF 9F"  (ID 无 h 后缀)
+    re.compile(r'(?:\d+\)\s+[\d.]+\s+)?Rx\s+([0-9A-Fa-f]{2,8})h?\s+(\d)\s+((?:[0-9A-Fa-f]{2}\s+)+)'),
+    # 复制文本格式: "100h  [4]  00 00 00 00"
+    re.compile(r'([0-9A-Fa-f]{2,8})h\s+\[\s*(\d+)\s*\]\s*((?:[0-9A-Fa-f]{2}[\s:]+)+)'),
+    # trc v2.x: "100h Rx 4 00 00 00 00"
+    re.compile(r'([0-9A-Fa-f]{2,8})h\s+(?:Rx|Tx)\s+(\d)\s+((?:[0-9A-Fa-f]{2}\s+)+)'),
 ]
 
 frames, alerts, unknown, total = {}, [], 0, 0
 for line in open(sys.argv[1], errors='replace'):
-    if not re.search(r'[0-9A-Fa-f]{2,8}h', line):
+    if not re.search(r'Rx\s+[0-9A-Fa-f]{2,8}', line):
         continue
     total += 1
     m = None
@@ -37,6 +40,7 @@ for line in open(sys.argv[1], errors='replace'):
     elif cid == 0x101 and n == 4: frames.setdefault('0x101 lon', []).append(f32(data))
     elif cid == 0x102 and n == 2: frames.setdefault('0x102 spd(km/h)', []).append(s16(data))
     elif cid == 0x103 and n == 2: frames.setdefault('0x103 temp(C)', []).append(s16(data)/10)
+    elif cid == 0x108 and n == 2: frames.setdefault('0x108 humi(%)', []).append(s16(data)/10)   # 块K 2026-10-02 新增(DHT11)
     elif cid in (0x104, 0x105, 0x106) and n == 2:
         frames.setdefault('0x10%d acc(g)' % (cid - 0x104 + 4), []).append(s16(data)/100)
     elif cid == 0x107 and n == 2: frames.setdefault('0x107 sat/flag', []).append('%d/%d' % (data[0], data[1]))

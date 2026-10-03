@@ -1,4 +1,4 @@
-/* ★ 2026-09-23 块D Day③ 核对版（可直接替换工程 Core\Src\main.c）
+﻿/* ★ 2026-09-23 块D Day③ 核对版（可直接替换工程 Core\Src\main.c）
    相对原版的两处修正：
    1) HAL_Delay(1000) -> rx_count += DrainRx(1000) 并挪到 [STAT] 之前
       —— 命令帧不再憋 1 秒，收到立即回帧；命令帧也计入 rx 统计
@@ -305,24 +305,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
         {
-#if GPS_TEST
-    /* ---- ★块F GPS透传测试: USART2(9600)收到什么, 原样从 USART1(115200) 打出 ---- */
-                static uint32_t t_mpu = 0;
-    int16_t ax, ay, az;
-    if (HAL_GetTick() - t_mpu >= 500) {      /* 500ms 一拍,非阻塞 */
-        t_mpu = HAL_GetTick();
-        MPU6050_ReadAccel(&ax, &ay, &az);
-        printf("[MPU] ax=%6d ay=%6d az=%6d\r\n", ax, ay, az);
-    }
-            char line[100];
-    if (GPS_PopLine(line, sizeof(line))) {
-        printf("RAW:%s\r\n", line);          /* 原始语句:人工对数用 */
-        GPS_ParseLine(line);
-        printf("[GPS] valid=%d lat=%.6f lon=%.6f spd=%.1f sat=%d\r\n",
-               g_gps.valid, g_gps.latitude, g_gps.longitude,
-               g_gps.speed_kmh, g_gps.satellites);
-    }
-#else
     uint32_t now = HAL_GetTick();                   /* ★ 时间基准每圈取一次 */
 
     /* ---- 100ms 档: 加速度 3 帧 ---- */
@@ -336,9 +318,10 @@ int main(void)
     if (now - t_gps >= 1000) {
         t_gps = now;
         UpdateGps();
-        printf("[TX] lat=%.6f lon=%.6f spd=%d sat=%d flag=%d\r\n",
+        printf("[TX] lat=%.6f lon=%.6f spd=%d sat=%d flag=%d | ax=%d ay=%d az=%d (0.01g)\r\n",
                g_vehicle.lat, g_vehicle.lon, g_vehicle.speed,
-               g_vehicle.sat_num, g_vehicle.alarm_flag);
+               g_vehicle.sat_num, g_vehicle.alarm_flag,
+               g_vehicle.acc_x, g_vehicle.acc_y, g_vehicle.acc_z);
         err_gps |= CAN_ReportGps();
     }
 
@@ -377,7 +360,6 @@ int main(void)
                rx_cnt, err_gps, err_acc, err_tmp);
         rx_cnt = 0; err_gps = 0; err_acc = 0; err_tmp = 0;
     }
-#endif
   }
   /* USER CODE END WHILE */
 
@@ -473,17 +455,18 @@ uint8_t CAN_SendAlarm(int16_t acc_g100)
 
 // ==================== ★ 分组上报(KP-E6) ====================
 
-/* 1 秒组 4 帧: 0x100/0x101/0x102/0x107 —— 返回错误位图 bit0~3 */
 uint8_t CAN_ReportGps(void)
 {
     uint8_t err = 0;
-    if (CAN_SendLatitude()  != 0) err |= (1U << 0);
-    DrainRx(3);                                   /* 帧间隔 + FIFO防积压(KP-E3) */
-    if (CAN_SendLongitude() != 0) err |= (1U << 1);
-    DrainRx(3);
-    if (CAN_SendSpeed()     != 0) err |= (1U << 2);
-    DrainRx(3);
-    if (CAN_SendSatInfo()   != 0) err |= (1U << 3);
+    if (g_gps.valid) {                              /* KP-J3:没定位不发垃圾坐标 */
+        if (CAN_SendLatitude()  != 0) err |= (1U << 0);
+        DrainRx(3);
+        if (CAN_SendLongitude() != 0) err |= (1U << 1);
+        DrainRx(3);
+        if (CAN_SendSpeed()     != 0) err |= (1U << 2);
+        DrainRx(3);
+    }
+    if (CAN_SendSatInfo()   != 0) err |= (1U << 3); /* 卫星数/标志照发:0 也是真值 */
     DrainRx(3);
     return err;
 }
