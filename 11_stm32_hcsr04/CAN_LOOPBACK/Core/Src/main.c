@@ -294,6 +294,7 @@ int main(void)
   // 执行打包解包测试
   TestPackUnpack();
   TestNmea();
+  memset(&g_gps, 0, sizeof(g_gps));   /* 自检后清零，防止测试坐标进生产数据 */
   I2C_Scan();               /* ★块H Day51:I2C 总线普查 */
     if (MPU6050_Init() != 0)
       printf("[MPU] init FAILED - check wiring\r\n");   /* 失败只报警,不死机 */

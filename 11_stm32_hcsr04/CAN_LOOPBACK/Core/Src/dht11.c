@@ -105,7 +105,7 @@ static uint8_t dht11_read_byte(void)
 }
 
 /* Read temp/humi: 0=ok 1=no response 2=checksum error.On failure 
-    *humi/*temp stay untouched (fix #2, Block-J rule). */
+    *humi/ *temp stay untouched (fix #2, Block-J rule). */
 uint8_t dht11_read(uint8_t *humi, uint8_t *temp)
 {
     uint8_t buf[5] = {0};
